@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+env/
+venv/
+node_modules/
+.DS_Store
+share_screenshot.png
+share_content.txt
+share_content.html
+share_content.txt
+scratch_scrape.py
