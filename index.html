@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>빅5 병원 통합 예약 에이전트</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#F3F5F9;--card:#fff;--ink:#0F172A;--ink2:#475569;--ink3:#94A3B8;--border:#E2E8F0;--accent:#2563EB;--accent2:#3B82F6;--success:#059669;--warn:#D97706;--danger:#DC2626;--radius:14px;--radius-sm:10px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Noto Sans KR',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;-webkit-font-smoothing:antialiased}
+input,textarea,button{font-family:inherit}button{cursor:pointer;border:none;outline:none}input,textarea{outline:none}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:#CBD5E1;border-radius:3px}
+.header{background:var(--ink);color:#fff;padding:18px 24px;border-bottom:3px solid var(--accent);position:sticky;top:0;z-index:100}
+.header-inner{max-width:960px;margin:0 auto}
+.header-tag{font-size:10px;font-weight:700;color:#60A5FA;letter-spacing:2.5px;margin-bottom:3px;font-family:'JetBrains Mono',monospace}
+.header-title{font-size:20px;font-weight:900}.header-sub{font-size:11px;color:var(--ink3);margin-top:3px}
+.container{max-width:720px;margin:0 auto;padding:28px 20px 80px}
+.steps{display:flex;align-items:center;margin-bottom:32px;padding:0 4px}
+.step-item{display:flex;align-items:center}.step-item.grow{flex:1}
+.step-dot{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0;transition:all .3s}
+.step-dot.active{background:var(--ink);color:#fff}.step-dot.inactive{background:var(--border);color:var(--ink3)}
+.step-label{margin-left:7px;font-size:12px;white-space:nowrap}.step-label.active{font-weight:700;color:var(--ink)}.step-label.inactive{font-weight:400;color:var(--ink3)}
+.step-line{flex:1;height:2px;margin:0 10px}.step-line.active{background:var(--ink)}.step-line.inactive{background:var(--border)}
+.label{display:block;font-size:12px;font-weight:700;color:var(--ink2);margin-bottom:6px;letter-spacing:.3px}
+.input{width:100%;padding:12px 14px;border-radius:var(--radius-sm);border:1.5px solid var(--border);font-size:14px;color:var(--ink);background:var(--card);transition:border .2s}
+.input:focus{border-color:var(--accent)}.input::placeholder{color:#B0BEC5}textarea.input{min-height:80px;resize:vertical}
+.chip{padding:7px 14px;border-radius:8px;font-size:13px;font-weight:600;transition:all .15s;display:inline-block;border:1.5px solid var(--border);background:#F8FAFC;color:#334155}
+.chip:hover{border-color:#CBD5E1;background:#F1F5F9}.chip.selected{background:var(--ink);color:#fff;border-color:var(--ink)}.chip.accent{background:#1E40AF;color:#fff;border-color:#1E40AF}
+.btn{width:100%;border-radius:12px;font-weight:700;transition:all .2s;text-align:center}
+.btn-primary{background:var(--ink);color:#fff}.btn-primary:hover{background:#1E293B}.btn-primary:disabled{opacity:.4;cursor:not-allowed}.btn-secondary{background:#F1F5F9;color:var(--ink2)}
+.btn-big{padding:18px 0;font-size:18px;border-radius:16px;letter-spacing:.5px}
+.btn-mid{padding:14px 0;font-size:15px}
+.card{background:var(--card);border-radius:var(--radius);padding:16px;border:1.5px solid var(--border);transition:all .2s;cursor:pointer}
+.card:hover{border-color:#CBD5E1}.card.expanded{box-shadow:0 4px 24px rgba(0,0,0,.06)}
+.toggle-group{display:flex;gap:2px;background:#F1F5F9;border-radius:8px;padding:2px}
+.toggle-btn{padding:6px 12px;border-radius:6px;font-size:11px;font-weight:600;background:transparent;color:var(--ink3);transition:all .2s}
+.toggle-btn.active{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.hira-strip{background:#FFFBEB;border:1px solid #FDE68A;border-radius:12px;padding:14px;margin-bottom:16px;font-size:12px;color:#92400E}
+.hira-detail{margin-top:12px;background:#fff;border-radius:var(--radius-sm);padding:14px;border:1px solid #E2E8F0}
+.mini-stat{padding:8px 10px;border-radius:8px;background:#F8FAFC;border:1px solid #F1F5F9}
+.mini-stat .lbl{font-size:9px;color:var(--ink3);margin-bottom:1px}.mini-stat .val{font-size:14px;font-weight:800}
+.purpose-card{padding:14px 16px;border-radius:12px;border:2px solid var(--border);background:var(--card);text-align:left;transition:all .2s}
+.purpose-card.selected{border-color:var(--ink);background:#F8FAFC}.purpose-card:hover{border-color:#CBD5E1}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner{width:56px;height:56px;border:3px solid var(--border);border-top-color:var(--ink);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 24px}
+.progress-bar{width:100%;height:5px;background:#F1F5F9;border-radius:3px;overflow:hidden}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--ink),var(--accent2));border-radius:3px;transition:width .4s ease}
+.doc-gradient{border-radius:14px;padding:18px;color:#fff;margin-bottom:18px}
+@keyframes popIn{from{transform:scale(0)}to{transform:scale(1)}}
+.check-circle{width:68px;height:68px;border-radius:50%;background:#D1FAE5;display:flex;align-items:center;justify-content:center;font-size:34px;margin:0 auto 18px;animation:popIn .4s cubic-bezier(.34,1.56,.64,1) .3s both}
+.info-box{border-radius:var(--radius-sm);padding:12px 14px;font-size:12px;text-align:left}
+.info-box.green{background:#F0FDF4;border:1px solid #BBF7D0;color:#166534}
+.info-box.yellow{background:#FFFBEB;border:1px solid #FDE68A;color:#92400E}
+.info-box.blue{background:#F0F9FF;border:1px solid #BAE6FD;color:#0369A1}
+.sort-tabs{display:flex;gap:3px;margin-bottom:16px;background:#F1F5F9;border-radius:var(--radius-sm);padding:3px}
+.sort-tab{flex:1;padding:9px 0;border-radius:8px;font-size:12px;font-weight:500;background:transparent;color:var(--ink2);transition:all .2s;text-align:center}
+.sort-tab.active{background:#fff;color:var(--ink);font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.stat-box{padding:10px 12px;border-radius:9px;background:#F8FAFC;border:1px solid #F1F5F9}.stat-box.hl{background:#EFF6FF;border-color:#BFDBFE}
+.grp-btn{display:flex;align-items:center;gap:6;width:100%;padding:9px 12px;border-radius:9px;background:#F8FAFC;border:1px solid #E2E8F0;cursor:pointer;transition:all .2s;text-align:left;margin-bottom:4px}
+.grp-btn:hover{background:#F1F5F9}.grp-btn.open{background:#EFF6FF;border-color:#BFDBFE}
+@media(min-width:768px){.container{max-width:760px;padding:36px 32px 80px}.header{padding:22px 32px}.header-title{font-size:24px}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}.card{padding:18px}}
+@media(min-width:1024px){.container{max-width:860px;padding:40px 40px 80px}.header-inner{max-width:860px}.step-dot{width:40px;height:40px;font-size:14px}.step-label{font-size:13px}}
+@media(max-width:480px){.container{padding:18px 14px 60px}.header{padding:14px 16px}.header-title{font-size:17px}.chip{padding:5px 10px;font-size:12px}.step-dot{width:30px;height:30px;font-size:11px}.step-label{font-size:10px;margin-left:4px}.sort-tab{font-size:11px;padding:8px 0}.btn-big{padding:16px 0;font-size:16px}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script type="text/babel">
+const{useState,useEffect}=React;
+const H=[
+{id:"snuh",name:"서울대학교병원",short:"서울대병원",color:"#1B3A5C",accent:"#3B7DD8"},
+{id:"amc",name:"서울아산병원",short:"아산병원",color:"#0D4E2C",accent:"#2EA85A"},
+{id:"smc",name:"삼성서울병원",short:"삼성병원",color:"#1A237E",accent:"#5C6BC0"},
+{id:"sev",name:"세브란스병원",short:"세브란스",color:"#0D47A1",accent:"#42A5F5"},
+{id:"snubh",name:"분당서울대병원",short:"분당서울대",color:"#4A148C",accent:"#AB47BC"},
+];
+
+const SP_GROUPS={
+"내과계":{
+  "소화기내과":["위암","대장암","간암","췌장암","GERD","IBD","간경변","식도질환","담석"],
+  "호흡기내과":["폐암","천식","COPD","폐섬유증","기관지확장증","폐렴","흉막질환"],
+  "순환기내과":["관상동맥질환","심부전","부정맥","판막질환","대동맥질환","고혈압","심근병증"],
+  "내분비내과":["당뇨병","갑상선질환","골다공증","부신질환","뇌하수체종양","대사증후군"],
+  "신장내과":["만성신부전","사구체신염","투석","신장이식","다낭신","전해질이상"],
+  "혈액종양내과":["백혈병","림프종","다발성골수종","빈혈","MDS","항암치료"],
+  "류마티스내과":["류마티스관절염","루프스","강직성척추염","통풍","베체트병","혈관염"],
+  "감염내과":["패혈증","결핵","HIV","간염","원인불명열","여행의학"],
+  "알레르기내과":["알레르기비염","두드러기","아나필락시스","약물알레르기","면역결핍"],
+},
+"외과계":{
+  "일반외과":["위암수술","대장암수술","간암수술","담낭절제","탈장","충수염","복강경수술"],
+  "외과(유방)":["유방암","유방양성종양","유방재건","유방축소"],
+  "외과(갑상선)":["갑상선암","갑상선결절","부갑상선질환"],
+  "흉부외과":["폐암수술","식도암수술","CABG","판막수술","대동맥수술","기흉"],
+  "심장혈관외과":["관상동맥우회술","대동맥수술","말초혈관","정맥류","혈관기형"],
+  "신경외과":["뇌종양","뇌동맥류","척추질환","디스크","척수종양","삼차신경통","뇌전증수술"],
+  "정형외과":["인공관절","골절","인대손상","척추측만증","회전근개","스포츠손상","골종양"],
+  "비뇨의학과":["전립선암","방광암","신장암","전립선비대증","요로결석","요실금","남성불임"],
+  "산부인과":["자궁근종","난소암","자궁경부암","자궁내막증","골반장기탈출","불임","고위험임신"],
+  "성형외과":["안면윤곽","코성형","눈성형","유방재건","화상재건","미세수술","안면마비재건"],
+  "이식외과":["간이식","신장이식","췌장이식","다장기이식"],
+},
+"감각기·두경부":{
+  "이비인후과":["비중격만곡","부비동염","편도질환","중이염","난청","두경부암","음성장애","수면무호흡"],
+  "안과":["백내장","녹내장","망막질환","황반변성","당뇨망막병증","사시","라식/라섹","안성형"],
+  "피부과":["아토피","건선","피부암","여드름","탈모","대상포진","색소질환"],
+  "치과(구강외과)":["사랑니발치","구강암","턱관절","임플란트","악안면기형","구강점막질환"],
+},
+"신경·정신·재활":{
+  "신경과":["뇌졸중","간질","파킨슨병","치매","다발성경화증","두통","말초신경병","근무력증"],
+  "정신건강의학과":["우울증","불안장애","조현병","ADHD","수면장애","중독","PTSD","양극성장애"],
+  "재활의학과":["뇌졸중재활","척수손상재활","근골격재활","소아재활","심장재활","로봇재활"],
+},
+"영상·방사선":{
+  "영상의학과":["중재시술","혈관색전술","경피적배액술","RFA","TACE","스텐트삽입"],
+  "방사선종양학과":["방사선치료","양성자치료","감마나이프","SBRT","세기조절방사선"],
+  "핵의학과":["PET-CT","갑상선치료","방사성동위원소","테라노스틱스"],
+},
+"소아·가정·기타":{
+  "소아청소년과":["소아감염","소아혈액종양","소아심장","소아신경","소아내분비","소아알레르기","신생아"],
+  "소아외과":["소아종양","선천성기형","소아비뇨","소아정형"],
+  "가정의학과":["건강검진","비만","금연","노인건강","만성질환관리"],
+  "응급의학과":["외상","중독","심정지","화상","다발성손상"],
+  "직업환경의학과":["직업성질환","유해물질노출","건강검진(산업)"],
+  "마취통증의학과":["만성통증","신경차단","수술전평가","암성통증","두통"],
+},
+};
+const SP={};Object.values(SP_GROUPS).forEach(g=>Object.assign(SP,g));
+
+const PU=[
+{id:"diagnosis",label:"진단",icon:"🔍",desc:"초진 검사 및 진단"},
+{id:"second_opinion",label:"2차 소견",icon:"📋",desc:"기존 진단에 대한 재검토"},
+{id:"surgery",label:"수술",icon:"🏥",desc:"수술 상담 및 예약"},
+{id:"complication",label:"합병증 치료",icon:"⚕️",desc:"치료 후 합병증 관리"},
+];
+
+function mkHira(hid,dis){
+const s=(hid+dis).split("").reduce((a,c)=>a+c.charCodeAt(0),0);
+const r=n=>((s*9301+49297+n*173)%233280)/233280;
+const f={snuh:1.1,amc:1.25,smc:1.05,sev:0.95,snubh:0.8}[hid]||1;
+const as_=Math.floor(80+r(1)*600*f);
+return{annualSurgeries:as_,annualCases:Math.floor(as_*(1.5+r(2)*2)),
+mortalityRate:parseFloat(Math.max(0.1,(2.5-r(3)*2.2)).toFixed(1)),
+complicationRate:parseFloat(Math.max(1,(8-r(4)*6)).toFixed(1)),
+readmissionRate:parseFloat(Math.max(1,(10-r(5)*7)).toFixed(1)),
+avgLOS:Math.floor(4+r(6)*12),
+trend:[0,1,2].map(y=>({year:2023+y,surgeries:Math.floor(as_*(0.85+r(10+y)*0.3))})),
+dataYear:"2025",source:"심평원 + 건보공단"};
+}
+
+function genDocs(hid,sp,dis){
+const s=(hid+sp+dis).split("").reduce((a,c)=>a+c.charCodeAt(0),0);
+const r=n=>((s*9301+49297+n*233)%233280)/233280;
+const ln=["김","이","박","최","정","강","조","윤","장","임","한","오","서","신","권","황"];
+const fn=["영수","지훈","성호","민재","준혁","태현","동욱","상훈","정민","은경","수진","혜원","미란","지현"];
+const cnt=2+Math.floor(r(0)*2),docs=[],hd=mkHira(hid,dis);
+for(let i=0;i<cnt;i++){
+const hi=Math.floor(15+r(i*10+1)*55),wd=Math.floor(3+r(i*10+2)*45);
+const nc=Math.floor(r(i*10+3)*80),pp=Math.floor(20+r(i*10+4)*180);
+const nm=ln[Math.floor(r(i*10+5)*ln.length)]+fn[Math.floor(r(i*10+6)*fn.length)];
+const pos=hi>45?"교수":hi>30?"부교수":"조교수";
+const ds=Math.floor(hd.annualSurgeries*(0.15+r(i*10+11)*0.35)/cnt);
+docs.push({id:`${hid}-${i}`,name:nm,position:pos,hospitalId:hid,specialty:sp,hIndex:hi,waitDays:wd,newsCount:nc,papers:pp,
+citations:Math.floor(pp*(3+r(i*10+7)*15)),docSurgeries:ds,hiraData:hd,
+slots:[{date:nxtD(wd),time:["09:00","10:30","14:00","15:30"][Math.floor(r(i*10+8)*4)]},{date:nxtD(wd+7),time:["09:30","11:00","14:30","16:00"][Math.floor(r(i*10+9)*4)]}]});}
+return docs;}
+
+function nxtD(d){const dt=new Date();dt.setDate(dt.getDate()+d);while(dt.getDay()===0||dt.getDay()===6)dt.setDate(dt.getDate()+1);return dt.toISOString().split("T")[0];}
+function fD(s){const d=new Date(s);return`${d.getMonth()+1}/${d.getDate()}(${"일월화수목금토"[d.getDay()]})`;}
+const gh=id=>H.find(h=>h.id===id);
+
+function Steps({current,steps}){return(
+<div className="steps">{steps.map((s,i)=>(
+<React.Fragment key={i}>
+<div className="step-item"><div className={`step-dot ${i<=current?'active':'inactive'}`}>{i<current?'✓':i+1}</div>
+<span className={`step-label ${i===current?'active':'inactive'}`}>{s}</span></div>
+{i<steps.length-1&&<div className="step-item grow"><div className={`step-line ${i<current?'active':'inactive'}`}/></div>}
+</React.Fragment>))}</div>);}
+
+/* ─── S1: Patient Input ─── */
+function S1({data:d,onChange:oc,onNext}){
+const[dept,setDept]=useState(d.department||"");
+const[mode,setMode]=useState(d.diseaseMode||"chip");
+const[ft,setFt]=useState(d.freeTextDisease||"");
+const[openGrp,setOpenGrp]=useState(null);
+const ok=d.age&&d.gender&&(mode==="chip"?(d.department&&d.disease):ft.trim().length>1)&&d.purpose;
+
+return(<div>
+<h2 style={{fontSize:22,fontWeight:800,marginBottom:4}}>환자 정보 입력</h2>
+<p style={{color:'var(--ink3)',fontSize:14,marginBottom:28}}>진료 대상 환자의 기본 정보를 입력해주세요.</p>
+
+<div className="two-col" style={{marginBottom:20}}>
+<div><label className="label">나이</label><input className="input" type="number" placeholder="예: 55" value={d.age||""} onChange={e=>oc({...d,age:e.target.value})}/></div>
+<div><label className="label">성별</label><div style={{display:'flex',gap:8}}>
+{["남성","여성"].map(g=><button key={g} className={`chip ${d.gender===g?'selected':''}`} style={{flex:1,textAlign:'center'}} onClick={()=>oc({...d,gender:g})}>{g}</button>)}
+</div></div>
+</div>
+
+<div style={{marginBottom:20}}>
+<div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+<label className="label" style={{margin:0}}>질환 입력</label>
+<div className="toggle-group">
+{[{k:"chip",l:"진료과 선택"},{k:"text",l:"직접 입력"}].map(m=>(
+<button key={m.k} className={`toggle-btn ${mode===m.k?'active':''}`}
+onClick={()=>{setMode(m.k);if(m.k==="text")oc({...d,disease:ft,diseaseMode:"text"});else oc({...d,disease:d.chipDisease||"",diseaseMode:"chip"});}}>{m.l}</button>
+))}
+</div>
+</div>
+
+{mode==="chip"?(<>
+<div style={{marginBottom:12}}>
+<div style={{fontSize:11,color:'var(--ink3)',marginBottom:8}}>진료과 <span style={{color:'#CBD5E1'}}>— 카테고리를 눌러 펼치세요</span></div>
+{Object.entries(SP_GROUPS).map(([grp,deptMap])=>{
+const grpDepts=Object.keys(deptMap);
+const hasSelected=grpDepts.includes(dept);
+const isOpen=openGrp===grp||hasSelected;
+return(<div key={grp} style={{marginBottom:4}}>
+<button className={`grp-btn ${isOpen?'open':''}`}
+onClick={()=>setOpenGrp(isOpen&&!hasSelected?null:grp)}>
+<span style={{fontSize:13,fontWeight:700,color:hasSelected?'#1D4ED8':'var(--ink)',flex:1}}>{grp}</span>
+<span style={{fontSize:10,color:'var(--ink3)'}}>{grpDepts.length}개과</span>
+<span style={{fontSize:11,color:'var(--ink3)',transition:'transform .2s',display:'inline-block',transform:isOpen?'rotate(180deg)':'rotate(0)'}}>▼</span>
+</button>
+{isOpen&&<div style={{display:'flex',flexWrap:'wrap',gap:5,padding:'6px 4px 8px'}}>
+{grpDepts.map(dp=><button key={dp} className={`chip ${dept===dp?'selected':''}`} style={{fontSize:12,padding:'5px 10px'}}
+onClick={()=>{setDept(dp);setOpenGrp(grp);oc({...d,department:dp,disease:"",chipDisease:""});}}>{dp}</button>)}
+</div>}
+</div>);
+})}
+</div>
+{dept&&<div style={{marginBottom:4}}>
+<div style={{fontSize:11,color:'var(--ink3)',marginBottom:6}}>질환 <span style={{fontWeight:700,color:'var(--ink)'}}>[{dept}]</span></div>
+<div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+{SP[dept].map(dis=><button key={dis} className={`chip ${d.disease===dis?'accent':''}`} style={{fontSize:12,padding:'5px 10px'}}
+onClick={()=>oc({...d,disease:dis,chipDisease:dis})}>{dis}</button>)}
+</div>
+</div>}
+</>):(<div>
+<input className="input" value={ft} onChange={e=>{setFt(e.target.value);oc({...d,disease:e.target.value,freeTextDisease:e.target.value,diseaseMode:"text"});}}
+placeholder="예: 간문부 담관암, 미만성 거대B세포 림프종, 베체트병 ..."/>
+<div className="info-box green" style={{marginTop:8}}>💡 <b>AI 매칭:</b> 질환명으로 관련 진료과·전문의를 자동 매칭합니다. 심평원 KCD 코드 + 수술코드 기반 검색.</div>
+</div>)}
+</div>
+
+<div style={{marginBottom:32}}>
+<label className="label">진료 목적</label>
+<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+{PU.map(p=><button key={p.id} className={`purpose-card ${d.purpose===p.id?'selected':''}`} onClick={()=>oc({...d,purpose:p.id})}>
+<div style={{fontSize:20,marginBottom:4}}>{p.icon}</div>
+<div style={{fontWeight:700,fontSize:14}}>{p.label}</div>
+<div style={{fontSize:11,color:'var(--ink3)',marginTop:2}}>{p.desc}</div>
+</button>)}
+</div>
+</div>
+
+<button className="btn btn-primary btn-big" disabled={!ok} onClick={onNext}>
+🔍 의사 검색 시작
+</button>
+</div>);
+}
+
+/* ─── S2: Loading ─── */
+function S2({onDone}){
+const[p,setP]=useState(0);const[st,setSt]=useState("");
+const stages=["서울대병원 대기정보 조회 중...","서울아산병원 예약현황 수집 중...","삼성서울병원 의료진 수집 중...","세브란스병원 연동 중...","분당서울대병원 조회 중...","심평원(HIRA) 수술건수·사망률 조회 중...","건보공단(NHIS) 진료통계 연동 중...","PubMed / KCI H-index 산출 중...","네이버뉴스 언론노출 집계 중...","분석 완료!"];
+useEffect(()=>{let i=0;const iv=setInterval(()=>{i++;setP(Math.min(i/stages.length*100,100));setSt(stages[Math.min(i-1,stages.length-1)]);if(i>=stages.length){clearInterval(iv);setTimeout(onDone,600);}},550);return()=>clearInterval(iv);},[]);
+return(<div style={{textAlign:'center',padding:'60px 20px'}}>
+<div className="spinner"/><div style={{fontSize:15,fontWeight:600,marginBottom:16}}>{st}</div>
+<div className="progress-bar"><div className="progress-fill" style={{width:`${p}%`}}/></div>
+<div style={{fontSize:12,color:'var(--ink3)',marginTop:8}}>{Math.round(p)}%</div>
+</div>);}
+
+/* ─── S3: Results ─── */
+function S3({patientData:pd,onSelect}){
+const[sortBy,setSort]=useState("wait");
+const[expId,setExp]=useState(null);
+const[showH,setSH]=useState(null);
+const dept=pd.department||"소화기내과";
+const all=H.flatMap(h=>genDocs(h.id,dept,pd.disease));
+const sorted=[...all].sort((a,b)=>{
+if(sortBy==="wait")return a.waitDays-b.waitDays;
+if(sortBy==="hindex")return b.hIndex-a.hIndex;
+if(sortBy==="news")return b.newsCount-a.newsCount;
+if(sortBy==="surgery")return b.docSurgeries-a.docSurgeries;return 0;});
+
+return(<div>
+<h2 style={{fontSize:22,fontWeight:800,marginBottom:4}}>검색 결과</h2>
+<p style={{color:'var(--ink3)',fontSize:13,marginBottom:16}}>{pd.disease} · {PU.find(p=>p.id===pd.purpose)?.label}</p>
+
+<div className="hira-strip">
+<div style={{fontWeight:700,marginBottom:8,fontSize:13}}>🏛 심평원·건보공단 병원별 수술실적 ({pd.disease})</div>
+<div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+{H.map(h=>{const hr=mkHira(h.id,pd.disease);return(
+<button key={h.id} onClick={()=>setSH(showH===h.id?null:h.id)}
+style={{padding:'6px 10px',borderRadius:8,border:`1px solid ${h.accent}40`,background:showH===h.id?`${h.accent}15`:'#fff',cursor:'pointer',fontSize:11,display:'flex',alignItems:'center',gap:5,transition:'all .15s'}}>
+<span style={{fontWeight:700,color:h.color}}>{h.short}</span>
+<span style={{color:'var(--ink2)'}}>{hr.annualSurgeries}건</span>
+</button>);})}
+</div>
+{showH&&(()=>{const h=gh(showH),hr=mkHira(showH,pd.disease);return(
+<div className="hira-detail" style={{borderColor:`${h.accent}30`}}>
+<div style={{fontWeight:800,fontSize:14,color:h.color,marginBottom:10}}>{h.name} — {pd.disease}</div>
+<div className="three-col" style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:12}}>
+<div className="mini-stat"><div className="lbl">연간 수술</div><div className="val">{hr.annualSurgeries}건</div></div>
+<div className="mini-stat"><div className="lbl">연간 진료</div><div className="val">{hr.annualCases}건</div></div>
+<div className="mini-stat"><div className="lbl">평균 재원</div><div className="val">{hr.avgLOS}일</div></div>
+<div className="mini-stat"><div className="lbl">수술사망률</div><div className="val" style={{color:hr.mortalityRate<1?'var(--success)':hr.mortalityRate<2?'var(--warn)':'var(--danger)'}}>{hr.mortalityRate}%</div></div>
+<div className="mini-stat"><div className="lbl">합병증률</div><div className="val" style={{color:hr.complicationRate<4?'var(--success)':hr.complicationRate<6?'var(--warn)':'var(--danger)'}}>{hr.complicationRate}%</div></div>
+<div className="mini-stat"><div className="lbl">재입원률</div><div className="val" style={{color:hr.readmissionRate<5?'var(--success)':'var(--warn)'}}>{hr.readmissionRate}%</div></div>
+</div>
+<div style={{fontSize:11,color:'var(--ink2)',fontWeight:600,marginBottom:6}}>📈 3년 추이</div>
+<div style={{display:'flex',gap:8}}>
+{hr.trend.map(t=><div key={t.year} style={{flex:1,padding:'8px 10px',borderRadius:8,background:'#F8FAFC',textAlign:'center',fontSize:11}}>
+<div style={{color:'var(--ink3)'}}>{t.year}</div><div style={{fontWeight:800,fontSize:15}}>{t.surgeries}</div></div>)}
+</div>
+<div style={{fontSize:10,color:'var(--ink3)',marginTop:8}}>출처: {hr.source} ({hr.dataYear})</div>
+</div>);})()}
+</div>
+
+<div className="sort-tabs">
+{[{k:"wait",l:"⏱ 대기순"},{k:"surgery",l:"🔪 수술건수"},{k:"hindex",l:"📊 H-index"},{k:"news",l:"📰 언론노출"}].map(s=>(
+<button key={s.k} className={`sort-tab ${sortBy===s.k?'active':''}`} onClick={()=>setSort(s.k)}>{s.l}</button>
+))}
+</div>
+
+<div style={{display:'flex',flexDirection:'column',gap:10}}>
+{sorted.map((doc,idx)=>{const h=gh(doc.hospitalId),ex=expId===doc.id;return(
+<div key={doc.id} className={`card ${ex?'expanded':''}`} style={{borderColor:ex?h.accent:'var(--border)'}} onClick={()=>setExp(ex?null:doc.id)}>
+<div style={{display:'flex',gap:12,alignItems:'flex-start'}}>
+<div style={{width:30,height:30,borderRadius:8,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:13,
+background:idx===0?'#FEF3C7':idx===1?'#F1F5F9':idx===2?'#FDE8D8':'#F8FAFC',
+color:idx===0?'#B45309':idx===1?'var(--ink2)':idx===2?'#C2410C':'var(--ink3)'}}>{idx+1}</div>
+<div style={{flex:1,minWidth:0}}>
+<div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4,flexWrap:'wrap'}}>
+<span style={{fontSize:10,fontWeight:700,color:h.accent,background:`${h.accent}15`,padding:'2px 7px',borderRadius:4}}>{h.short}</span>
+<span style={{fontSize:15,fontWeight:800}}>{doc.name}</span>
+<span style={{fontSize:11,color:'var(--ink3)'}}>{doc.position}</span>
+</div>
+<div style={{display:'flex',gap:10,fontSize:11,color:'var(--ink2)',flexWrap:'wrap'}}>
+<span>⏱ <b style={{color:doc.waitDays<=14?'var(--success)':doc.waitDays<=30?'var(--warn)':'var(--danger)'}}>{doc.waitDays}일</b></span>
+<span>🔪 <b style={{color:'var(--ink)'}}>{doc.docSurgeries}</b>건/년</span>
+<span>📊 <b>{doc.hIndex}</b></span>
+<span>📰 <b>{doc.newsCount}</b>건</span>
+</div></div></div>
+{ex&&<div style={{marginTop:14,paddingTop:14,borderTop:'1px solid var(--border)'}}>
+<div className="three-col" style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:14}}>
+<div className="stat-box hl"><div style={{fontSize:10,color:'var(--ink3)'}}>개인 수술</div><div style={{fontSize:17,fontWeight:800,color:'#1D4ED8'}}>{doc.docSurgeries}<span style={{fontSize:10,fontWeight:400}}> 건/년</span></div></div>
+<div className="stat-box"><div style={{fontSize:10,color:'var(--ink3)'}}>논문</div><div style={{fontSize:17,fontWeight:800}}>{doc.papers}<span style={{fontSize:10,fontWeight:400}}> 편</span></div></div>
+<div className="stat-box"><div style={{fontSize:10,color:'var(--ink3)'}}>인용수</div><div style={{fontSize:17,fontWeight:800}}>{doc.citations.toLocaleString()}</div></div>
+</div>
+<div className="info-box blue" style={{marginBottom:14}}>
+<div style={{fontSize:11,fontWeight:700,marginBottom:4}}>🏛 {h.short} 병원 (심평원)</div>
+<div style={{display:'flex',gap:12,fontSize:11,flexWrap:'wrap'}}>
+<span>수술 <b>{doc.hiraData.annualSurgeries}</b>건/년</span>
+<span>사망률 <b style={{color:doc.hiraData.mortalityRate<1?'var(--success)':'var(--warn)'}}>{doc.hiraData.mortalityRate}%</b></span>
+<span>합병증 <b>{doc.hiraData.complicationRate}%</b></span>
+<span>재원 <b>{doc.hiraData.avgLOS}일</b></span>
+</div></div>
+<div style={{marginBottom:14}}>
+<div style={{fontSize:12,fontWeight:700,color:'var(--ink2)',marginBottom:6}}>예약 가능</div>
+<div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+{doc.slots.map((sl,si)=><div key={si} style={{padding:'9px 14px',borderRadius:8,background:'#F8FAFC',border:'1px solid var(--border)',fontSize:13}}><b>{fD(sl.date)}</b> {sl.time}</div>)}
+</div></div>
+<button className="btn btn-primary btn-mid" style={{background:h.color}} onClick={e=>{e.stopPropagation();onSelect(doc);}}>이 의사로 예약 →</button>
+</div>}
+</div>);})}
+</div>
+</div>);}
+
+/* ─── S4: Reservation ─── */
+function S4({doctor:doc,patientData:pd,onConfirm,onBack}){
+const[sl,setSl]=useState(null);const[nm,setNm]=useState("");const[ph,setPh]=useState("");const[nt,setNt]=useState("");
+const[ssn1,setSsn1]=useState("");const[ssn2,setSsn2]=useState("");const[addr,setAddr]=useState("");const[showExtra,setShowExtra]=useState(false);
+const h=gh(doc.hospitalId);
+const canSubmit=sl!==null&&nm&&ph;
+return(<div style={{paddingBottom:100}}>
+<h2 style={{fontSize:22,fontWeight:800,marginBottom:4}}>예약 확인</h2>
+<p style={{color:'var(--ink3)',fontSize:13,marginBottom:24}}>예약 정보를 확인하고 환자 정보를 입력해주세요.</p>
+<div className="doc-gradient" style={{background:`linear-gradient(135deg,${h.color},${h.accent})`}}>
+<div style={{fontSize:12,opacity:.7,marginBottom:2}}>{h.name}</div>
+<div style={{fontSize:20,fontWeight:800,marginBottom:2}}>{doc.name} {doc.position}</div>
+<div style={{fontSize:13,opacity:.8}}>{pd.disease}</div>
+<div style={{display:'flex',gap:14,marginTop:10,fontSize:11,opacity:.9,flexWrap:'wrap'}}>
+<span>🔪 {doc.docSurgeries}건/년</span><span>H-idx {doc.hIndex}</span><span>논문 {doc.papers}편</span><span>뉴스 {doc.newsCount}건</span>
+</div>
+<div style={{marginTop:10,paddingTop:10,borderTop:'1px solid rgba(255,255,255,.2)',fontSize:10,opacity:.7}}>
+심평원: 병원 수술 {doc.hiraData.annualSurgeries}건/년 · 사망률 {doc.hiraData.mortalityRate}% · 합병증 {doc.hiraData.complicationRate}%
+</div></div>
+<div style={{marginBottom:20}}>
+<label className="label">진료 일시 선택</label>
+<div style={{display:'flex',gap:10}}>
+{doc.slots.map((s,i)=><button key={i} onClick={()=>setSl(i)}
+style={{padding:'14px 20px',borderRadius:12,flex:1,textAlign:'center',border:`2px solid ${sl===i?'var(--ink)':'var(--border)'}`,background:sl===i?'#F8FAFC':'var(--card)',cursor:'pointer',transition:'all .2s'}}>
+<div style={{fontWeight:700,fontSize:15}}>{fD(s.date)}</div><div style={{fontSize:13,color:'var(--ink2)',marginTop:2}}>{s.time}</div>
+</button>)}
+</div></div>
+<div className="two-col" style={{marginBottom:16}}>
+<div><label className="label">환자 이름 <span style={{color:'var(--danger)'}}>*</span></label><input className="input" value={nm} onChange={e=>setNm(e.target.value)} placeholder="홍길동"/></div>
+<div><label className="label">연락처 <span style={{color:'var(--danger)'}}>*</span></label><input className="input" value={ph} onChange={e=>setPh(e.target.value)} placeholder="010-1234-5678"/></div>
+</div>
+
+<div style={{marginBottom:16}}>
+<button onClick={()=>setShowExtra(!showExtra)}
+style={{display:'flex',alignItems:'center',gap:6,width:'100%',padding:'10px 14px',borderRadius:10,
+background:showExtra?'#EFF6FF':'#F8FAFC',border:`1px solid ${showExtra?'#BFDBFE':'var(--border)'}`,
+cursor:'pointer',transition:'all .2s'}}>
+<span style={{fontSize:13,fontWeight:600,color:'var(--ink)',flex:1,textAlign:'left'}}>
+{showExtra?'▼':'▶'} 주민등록번호 · 주소 입력 <span style={{fontSize:11,color:'var(--ink3)',fontWeight:400}}>(선택사항)</span>
+</span>
+</button>
+{showExtra&&<div style={{padding:'14px 0 0'}}>
+<div style={{marginBottom:12}}>
+<label className="label">주민등록번호 <span style={{fontSize:10,color:'var(--ink3)',fontWeight:400}}>— 일부 병원 초진 예약 시 필요</span></label>
+<div style={{display:'flex',gap:8,alignItems:'center'}}>
+<input className="input" value={ssn1} onChange={e=>{const v=e.target.value.replace(/\D/g,'').slice(0,6);setSsn1(v);}}
+placeholder="생년월일 6자리" maxLength={6} style={{flex:1,textAlign:'center',letterSpacing:2,fontFamily:"'JetBrains Mono',monospace"}}/>
+<span style={{fontSize:16,color:'var(--ink3)',fontWeight:700}}>—</span>
+<div style={{flex:1,display:'flex',alignItems:'center',gap:4}}>
+<input className="input" value={ssn2} onChange={e=>{const v=e.target.value.replace(/\D/g,'').slice(0,7);setSsn2(v);}}
+placeholder="뒷자리" maxLength={7} type="password"
+style={{flex:1,textAlign:'center',letterSpacing:2,fontFamily:"'JetBrains Mono',monospace"}}/>
+</div>
+</div>
+<div style={{fontSize:10,color:'var(--warn)',marginTop:4}}>🔒 주민등록번호는 암호화되어 전송되며, 예약 완료 후 즉시 파기됩니다.</div>
+</div>
+<div>
+<label className="label">주소 <span style={{fontSize:10,color:'var(--ink3)',fontWeight:400}}>— 우편물 수령 및 본인확인용</span></label>
+<input className="input" value={addr} onChange={e=>setAddr(e.target.value)}
+placeholder="예: 서울시 강남구 테헤란로 152"/>
+</div>
+</div>}
+</div>
+
+<div style={{marginBottom:16}}><label className="label">특이사항 (선택)</label>
+<textarea className="input" value={nt} onChange={e=>setNt(e.target.value)} placeholder="타 병원 진료 기록, 복용 중인 약물 등"/></div>
+
+{/* Sticky bottom bar */}
+<div style={{position:'fixed',bottom:0,left:0,right:0,padding:'12px 16px',
+background:'rgba(243,245,249,.95)',backdropFilter:'blur(10px)',WebkitBackdropFilter:'blur(10px)',
+borderTop:'1px solid var(--border)',zIndex:50}}>
+<div style={{maxWidth:720,margin:'0 auto',display:'flex',gap:10}}>
+<button className="btn btn-secondary" style={{flex:'none',padding:'16px 24px',fontSize:15,borderRadius:14}} onClick={onBack}>← 뒤로</button>
+<button className="btn btn-primary" style={{flex:1,padding:'18px 0',fontSize:18,borderRadius:14,background:h.color,opacity:canSubmit?1:.4,letterSpacing:1}}
+disabled={!canSubmit}
+onClick={()=>onConfirm({doctor:doc,slot:doc.slots[sl],patientName:nm,phone:ph,notes:nt,ssn:ssn1&&ssn2?ssn1+'-'+ssn2:'',address:addr})}>
+✅ 예약 확정
+</button>
+</div>
+</div>
+</div>);}
+
+/* ─── S5: Confirmation ─── */
+function S5({reservation:rv,onReset}){
+const h=gh(rv.doctor.hospitalId);
+return(<div style={{textAlign:'center',padding:'20px 0'}}>
+<div className="check-circle">✓</div>
+<h2 style={{fontSize:24,fontWeight:800,marginBottom:4}}>예약 완료</h2>
+<p style={{color:'var(--ink3)',fontSize:14,marginBottom:24}}>아래 내용으로 예약이 접수되었습니다.</p>
+<div style={{background:'#F8FAFC',borderRadius:14,padding:22,textAlign:'left',border:'1px solid var(--border)',marginBottom:18}}>
+<div style={{display:'grid',gridTemplateColumns:'auto 1fr',gap:'10px 16px',fontSize:14}}>
+{[["병원",h.name],["담당의",`${rv.doctor.name} ${rv.doctor.position}`],["수술실적",`개인 ${rv.doctor.docSurgeries}건/년 (병원 ${rv.doctor.hiraData.annualSurgeries}건/년)`],["일시",`${fD(rv.slot.date)} ${rv.slot.time}`],["환자",rv.patientName],["연락처",rv.phone],rv.address?["주소",rv.address]:null].filter(Boolean).map(([k,v],i)=>
+<React.Fragment key={i}><div style={{color:'var(--ink3)',fontWeight:600}}>{k}</div><div style={{fontWeight:600}}>{v}</div></React.Fragment>
+)}
+</div></div>
+<div className="info-box yellow" style={{marginBottom:24}}>💡 <b>안내:</b> 병원에서 확인 연락이 올 수 있습니다. 건강보험증 및 진료기록을 준비해주세요.</div>
+<button className="btn btn-primary btn-big" onClick={onReset}>새로운 예약 →</button>
+</div>);}
+
+/* ─── App ─── */
+function App(){
+const[step,setStep]=useState(0);
+const[pd,setPd]=useState({});
+const[doc,setDoc]=useState(null);
+const[res,setRes]=useState(null);
+const steps=["환자정보","검색","결과확인","예약","완료"];
+return(<div>
+<div className="header"><div className="header-inner">
+<div className="header-tag">BIG 5 HOSPITAL AGENT</div>
+<div className="header-title">빅5 병원 통합 예약 에이전트</div>
+<div className="header-sub">서울대 · 아산 · 삼성 · 세브란스 · 분당서울대 ┃ 심평원·건보공단 연동</div>
+</div></div>
+<div className="container">
+<Steps current={step>1?step-1:step} steps={steps}/>
+{step===0&&<S1 data={pd} onChange={setPd} onNext={()=>setStep(1)}/>}
+{step===1&&<S2 onDone={()=>setStep(2)}/>}
+{step===2&&<S3 patientData={pd} onSelect={d=>{setDoc(d);setStep(3);}}/>}
+{step===3&&doc&&<S4 doctor={doc} patientData={pd} onBack={()=>setStep(2)} onConfirm={r=>{setRes(r);setStep(4);}}/>}
+{step===4&&res&&<S5 reservation={res} onReset={()=>{setStep(0);setPd({});setDoc(null);setRes(null);}}/>}
+</div>
+</div>);}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
