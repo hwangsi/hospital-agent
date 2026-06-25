@@ -679,10 +679,37 @@ class SNUBHCrawler(HospitalCrawlerBase):
                 if not code:
                     print(f"[SNUBH] 진료과 코드 매핑 실패: {department}")
                     return []
-                return await self._fetch_doctors(client, code, department)
+                docs = await self._fetch_doctors(client, code, department)
+                # 영문명 부착 (영문 사이트 Find a Doctor, sDrSid=drNo 동일 키로 조인)
+                en_map = await self._fetch_en_name_map(client, code)
+                for d in docs:
+                    d["name_en"] = en_map.get(d.get("emp_id", ""), "")
+                return docs
         except Exception as e:
             print(f"[SNUBH] Crawl error: {e}")
             return []
+
+    async def _fetch_en_name_map(self, client, code: str) -> dict:
+        """영문 사이트에서 {sDrSid: 영문명} 조회 (1 request/진료과). sDrSid=drNo로 조인."""
+        from bs4 import BeautifulSoup
+        import re
+        out: dict = {}
+        try:
+            r = await client.get(f"{self.BASE}/dh/module/en_drIntroduce.do",
+                                 params={"DP_CD": "EN", "MENU_ID": "001001", "S_DP_CD": code})
+            soup = BeautifulSoup(r.text, "lxml")
+            for li in soup.select("ul.doctor_list > li"):
+                nm = li.select_one("p.doctor_name")
+                a = li.select_one("a[onclick*='sDrSid']")
+                if not (nm and a):
+                    continue
+                m = re.search(r"sDrSid=(\d+)", a.get("onclick", ""))
+                name = nm.get_text(" ", strip=True)
+                if m and name:
+                    out[m.group(1)] = name
+        except Exception as e:
+            print(f"[SNUBH-EN] 영문명 조회 실패: {e}")
+        return out
 
     async def _resolve_code(self, client, department: str) -> str:
         from bs4 import BeautifulSoup
