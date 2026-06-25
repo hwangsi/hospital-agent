@@ -274,6 +274,7 @@ class AMCCrawler(HospitalCrawlerBase):
     hospital_name = "서울아산병원"
 
     BASE = "https://www.amc.seoul.kr"
+    EN_BASE = "https://eng.amc.seoul.kr"   # 영문 사이트 (의료진 영문명, drEmpId 동일)
     STAFF_LIST_URL = BASE + "/asan/staff/base/staffBaseInfoList.do"
     _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
            "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
@@ -310,12 +311,42 @@ class AMCCrawler(HospitalCrawlerBase):
                     # 3) 의료진 카드 파싱
                     await page.goto(staff_url, wait_until="domcontentloaded", timeout=30000)
                     await page.wait_for_selector("ul.serchlist_boxwrap > li", timeout=8000)
-                    return await self._parse_doctor_cards(page, department)
+                    doctors = await self._parse_doctor_cards(page, department)
+                    # 4) 영문명 부착 (영문 사이트, drEmpId 동일 키로 조인)
+                    en_map = await self._fetch_en_name_map(dept_code)
+                    for d in doctors:
+                        d["name_en"] = en_map.get(d.get("emp_id", ""), "")
+                    return doctors
                 finally:
                     await browser.close()
         except Exception as e:
             print(f"[AMC] Crawl error: {e}")
             return []
+
+    async def _fetch_en_name_map(self, dept_code: str) -> dict:
+        """영문 사이트에서 {drEmpId: 영문명} 맵 조회 (1 request/진료과)."""
+        import httpx
+        import re
+        from bs4 import BeautifulSoup
+        out: dict = {}
+        try:
+            # 영문 서브도메인은 일부 환경에서 인증서 검증 이슈가 있어 verify=False (공개 읽기 전용)
+            async with httpx.AsyncClient(timeout=30, headers=_BROWSER_HEADERS,
+                                         follow_redirects=True, verify=False) as c:
+                r = await c.get(f"{self.EN_BASE}/gb/lang/specialities/departments.do",
+                                params={"hpCd": dept_code})
+                soup = BeautifulSoup(r.text, "lxml")
+                for fig in soup.select("figure.photo"):
+                    cap = fig.select_one("figcaption.name")
+                    li = fig.find_parent("li") or fig.parent
+                    a = li.select_one("a[href*='drEmpId=']") if li else None
+                    if cap and a:
+                        m = re.search(r"drEmpId=([^&\"']+)", a.get("href", ""))
+                        if m:
+                            out[m.group(1)] = cap.get_text(strip=True)
+        except Exception as e:
+            print(f"[AMC-EN] 영문명 조회 실패: {e}")
+        return out
 
     async def _resolve_dept_code(self, page, department: str) -> str:
         """진료과명을 진료과 코드(Dxxx)로 변환"""
@@ -423,6 +454,27 @@ class SMCCrawler(HospitalCrawlerBase):
     hospital_name = "삼성서울병원"
     BASE = "https://www.samsunghospital.com"
 
+    # 영문 사이트는 DP_CODE가 아닌 영문 슬러그를 쓰므로 진료과명→슬러그 맵을 둔다.
+    # (영문 진료과 목록 페이지가 슬러그를 노출하지 않아 2026-06 실측으로 확정)
+    _EN_SLUG = {
+        "소화기내과": "gastroenterology",
+        "순환기내과": "cardiology",
+        "호흡기내과": "pulmonary-and-critical-care-medicine",
+        "내분비내과": "endocrinology-and-metabolism",
+        "혈액종양내과": "hematology-oncology",
+        "류마티스내과": "rheumatology",
+        "신경외과": "neurosurgery",
+        "정형외과": "orthopedic-surgery",
+        "비뇨의학과": "urology",
+        "산부인과": "obstetrics-and-gynecology",
+        "안과": "ophthalmology",
+        "성형외과": "plastic-and-reconstructive-surgery",
+        "신경과": "neurology",
+        "흉부외과": "thoracic-and-cardiovascular-surgery",
+        "유방외과": "breast-surgery",
+        "내분비외과": "endocrine-surgery",
+    }
+
     async def get_doctors(self, department: str) -> list[dict]:
         import httpx
         try:
@@ -432,10 +484,41 @@ class SMCCrawler(HospitalCrawlerBase):
                 if not code:
                     print(f"[SMC] 진료과 코드 매핑 실패: {department}")
                     return []
-                return await self._fetch_doctors(client, code, department)
+                docs = await self._fetch_doctors(client, code, department)
+                # 영문명 부착 (영문 사이트, DR_NO 동일 키로 조인)
+                slug = self._en_slug(department)
+                if slug:
+                    en_map = await self._fetch_en_name_map(client, slug)
+                    for d in docs:
+                        d["name_en"] = en_map.get(d.get("emp_id", ""), "")
+                return docs
         except Exception as e:
             print(f"[SMC] Crawl error: {e}")
             return []
+
+    def _en_slug(self, department: str) -> str:
+        norm_map = {_norm_dept(k): v for k, v in self._EN_SLUG.items()}
+        for term in _dept_search_terms(department):
+            if term in norm_map:
+                return norm_map[term]
+        return ""
+
+    async def _fetch_en_name_map(self, client, slug: str) -> dict:
+        """영문 진료과 의료진 페이지에서 {DR_NO: 영문명} 조회 (1 request/진료과)."""
+        from bs4 import BeautifulSoup
+        import re
+        out: dict = {}
+        try:
+            r = await client.get(f"{self.BASE}/en/departments/{slug}/doctors.do")
+            soup = BeautifulSoup(r.text, "lxml")
+            for a in soup.select("a[href*='/en/find-doctor/']"):
+                m = re.search(r"-(\d+)\.do", a.get("href", ""))
+                nm = a.select_one("h3, .__name")
+                if m and nm:
+                    out[m.group(1)] = nm.get_text(strip=True)
+        except Exception as e:
+            print(f"[SMC-EN] 영문명 조회 실패: {e}")
+        return out
 
     async def _resolve_code(self, client, department: str) -> str:
         from bs4 import BeautifulSoup
