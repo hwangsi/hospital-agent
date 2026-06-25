@@ -1,7 +1,8 @@
 """
 PubMed E-utilities API — 의사별 H-index 산출
 - esearch: 논문 검색 (저자명 + 소속기관)
-- iCite: NIH 인용수 조회 (citation_count, 키 불필요)
+- OpenAlex: 인용수 조회 (cited_by_count, 키 불필요)
+  ※ 과거 NIH iCite(/api/pubs)를 썼으나 2026년 현재 404(폐지)라 OpenAlex로 교체.
 """
 import asyncio
 import json
@@ -14,10 +15,14 @@ import aiohttp
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from config.settings import NCBI_API_KEY, REQUEST_TIMEOUT
-from backend.utils.name_converter import convert_korean_name_to_english
+from backend.utils.name_converter import (
+    convert_korean_name_to_english,
+    english_name_to_pubmed_variants,
+)
 
-ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-ICITE_URL   = "https://icite.od.nih.gov/api/pubs"
+ESEARCH_URL  = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+OPENALEX_URL = "https://api.openalex.org/works"
+OPENALEX_MAILTO = "hospital-agent@example.com"   # OpenAlex polite pool 식별용
 
 # 병원 영문명 (PubMed affiliation 검색용)
 HOSPITAL_AFFILIATIONS = {
@@ -39,11 +44,15 @@ class PubMedClient:
     def __init__(self):
         self._cache: dict = {}
 
-    async def get_h_index(self, doctor_name: str, hospital_name: str) -> dict:
+    async def get_h_index(self, doctor_name: str, hospital_name: str,
+                           name_en: str = "") -> dict:
         """
         의사 이름 + 병원명으로 PubMed 검색 → H-index 산출.
-        한글 이름을 영어 성명으로 자동 변환해 검색 확률을 극대화합니다.
-        키 미등록이나 검색 0건 시 deterministic hash 기반 고품질 Fallback 학술지표를 반환합니다.
+
+        영문명 우선순위:
+          1) name_en — 병원 사이트가 제공한 실제 영문명(서울대 로마자/세브란스 nmEn). 최정확.
+          2) 없으면 한글 이름을 자모 분해 로마자로 변환.
+        키 미등록이나 검색 0건 시 deterministic hash 기반 Fallback 학술지표를 반환합니다.
         """
         cache_key = f"{doctor_name}:{hospital_name}"
         if cache_key in self._cache:
@@ -52,9 +61,11 @@ class PubMedClient:
         affiliations = HOSPITAL_AFFILIATIONS.get(hospital_name, [hospital_name])
 
         try:
-            # 한글 이름을 영어 성명 조합으로 변환 (Ahn KR, Ahn Kyu-ri 등)
-            eng_names = convert_korean_name_to_english(doctor_name)
-            
+            # 병원 제공 영문명이 있으면 그것을, 없으면 한글→로마자 변환을 사용
+            eng_names = english_name_to_pubmed_variants(name_en) if name_en else []
+            if not eng_names:
+                eng_names = convert_korean_name_to_english(doctor_name)
+
             pmids = []
             if eng_names:
                 pmids = await self._search_papers(eng_names, affiliations)
@@ -108,32 +119,41 @@ class PubMedClient:
                 return data.get("esearchresult", {}).get("idlist", [])
 
     async def _get_citations(self, pmids: list[str]) -> list[int]:
-        """NIH iCite API로 인용수 일괄 조회"""
+        """OpenAlex API로 PMID별 인용수(cited_by_count) 일괄 조회"""
         if not pmids:
             return []
 
         counts_map: dict[str, int] = {}
-        batch_size = 100
+        batch_size = 50   # OpenAlex OR 필터 권장 상한
 
-        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=_ssl_ctx())) as session:
+        headers = {"User-Agent": f"hospital-agent/1.0 (mailto:{OPENALEX_MAILTO})"}
+        async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=_ssl_ctx()), headers=headers
+        ) as session:
             for i in range(0, len(pmids), batch_size):
                 batch = pmids[i:i + batch_size]
                 try:
                     async with session.get(
-                        ICITE_URL,
-                        params={"pmids": ",".join(batch)},
+                        OPENALEX_URL,
+                        params={
+                            "filter": "pmid:" + "|".join(batch),
+                            "per-page": "200",
+                            "select": "ids,cited_by_count",
+                            "mailto": OPENALEX_MAILTO,
+                        },
                         timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
                     ) as resp:
                         if resp.status == 200:
                             data = await resp.json(content_type=None)
-                            for pub in data.get("data", []):
-                                pmid = str(pub.get("pmid", ""))
-                                counts_map[pmid] = int(pub.get("citation_count", 0))
+                            for work in data.get("results", []):
+                                pmid_url = (work.get("ids", {}) or {}).get("pmid", "") or ""
+                                pmid = pmid_url.rstrip("/").split("/")[-1]
+                                if pmid:
+                                    counts_map[pmid] = int(work.get("cited_by_count", 0) or 0)
                 except Exception as e:
-                    print(f"[iCite] batch {i//batch_size+1} error: {e}")
+                    print(f"[OpenAlex] batch {i//batch_size+1} error: {e}")
 
-                if not NCBI_API_KEY:
-                    await asyncio.sleep(0.2)
+                await asyncio.sleep(0.1)   # polite pool 호출 간격
 
         return [counts_map.get(pid, 0) for pid in pmids]
 

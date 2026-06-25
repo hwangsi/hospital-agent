@@ -117,10 +117,11 @@ def _match_dept(candidates, department: str):
 
 
 def _make_doctor(name: str, position: str, department: str, specialty: str,
-                 emp_id: str = "", reservation_url: str = "") -> dict:
+                 emp_id: str = "", reservation_url: str = "", name_en: str = "") -> dict:
     """크롤러 공통 의사 레코드 포맷."""
     return {
         "name": _clean_ws(name),
+        "name_en": _clean_ws(name_en),   # 병원 제공 영문명 (PubMed 검색 정확도 ↑)
         "position": _clean_ws(position),
         "department": department,
         "specialties": _clean_ws(specialty),
@@ -233,11 +234,18 @@ class SNUHCrawler(HospitalCrawlerBase):
                 name = strongs[0].get_text(strip=True) if strongs else ""
                 if not name:
                     continue
+                # strongs[1] = "( 漢字 / Yoon, Jung-Hwan )" → '/' 뒤의 영문명 추출
+                name_en = ""
+                if len(strongs) > 1:
+                    raw = strongs[1].get_text(" ", strip=True)
+                    if "/" in raw:
+                        name_en = raw.split("/")[-1].strip(" ()")
                 id_div = c.select_one("[id^='itrDrId_']")
                 dr_id = id_div.get_text(strip=True) if id_div else ""
                 spec_ps = c.select(".doctor-concentration-wrap p")
                 specialty = spec_ps[1].get_text(" ", strip=True) if len(spec_ps) > 1 else ""
-                doctors.append(_make_doctor(name, "", department, specialty, emp_id=dr_id))
+                doctors.append(_make_doctor(name, "", department, specialty,
+                                            emp_id=dr_id, name_en=name_en))
             if len(cards) < 5:                 # 마지막 페이지
                 break
         return doctors
@@ -385,6 +393,7 @@ class AMCCrawler(HospitalCrawlerBase):
                 reserv = self.BASE + reserv
             doctors.append({
                 "name": c["name"],
+                "name_en": "",                        # 목록에 영문명 없음 → 로마자 변환 사용
                 "position": "",                       # 직위는 상세페이지 전용 — 목록 미제공
                 "department": department,
                 "specialties": c.get("specialty", ""),
@@ -557,6 +566,7 @@ class SeveranceCrawler(HospitalCrawlerBase):
                 department,
                 (d.get("clnicRealm") or "").strip(),
                 emp_id=d.get("empNo", "") or "",
+                name_en=(d.get("nmEn") or "").strip(),
             ))
         return doctors
 

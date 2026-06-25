@@ -176,7 +176,10 @@ async def _enrich_doctor(doc: dict, hospital_id: str, hira_data: dict) -> dict:
     }
 
     # PubMed(국제) + Naver(뉴스) + KCI(국내) 동시 호출
-    pubmed_task = pubmed_client.get_h_index(doc["name"], hospital_names[hospital_id])
+    # 병원 제공 영문명(name_en)이 있으면 PubMed 검색 정확도가 크게 향상됨
+    pubmed_task = pubmed_client.get_h_index(
+        doc["name"], hospital_names[hospital_id], name_en=doc.get("name_en", "")
+    )
     naver_task = naver_client.get_news_count(doc["name"], hospital_names[hospital_id])
     kci_task = kci_client.search_papers(doc["name"], hospital_names[hospital_id])
 

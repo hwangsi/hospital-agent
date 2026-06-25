@@ -1,9 +1,19 @@
 """
-한글 의사 성명 -> PubMed/영문 매핑용 이름 변환 유틸리티
+한글 의사 성명 → PubMed 검색용 영문 표기 변환 유틸리티.
+
+두 가지 입력 경로:
+  1) 병원 사이트가 영문명을 제공하는 경우(서울대 로마자, 세브란스 nmEn 등)
+     → english_name_to_pubmed_variants() 로 실제 출판명 기반 변형 생성 (가장 정확)
+  2) 한글 이름만 있는 경우
+     → convert_korean_name_to_english(): 한글 자모를 분해해 국립국어원
+        로마자 표기법(Revised Romanization)으로 변환 (성씨는 관용 표기 우선)
+
+기존 구현은 ~40개 음절만 매핑한 사전 + 'Gildong' 폴백이라 대부분의 실명을
+'Yoon Jung don' 처럼 엉터리로 변환했음 → 자모 분해 알고리즘으로 전면 교체.
 """
 import re
 
-# 주요 명의 영문 매핑 사전 (빅5 병원의 실제 명의 매핑 확률 극대화)
+# 주요 명의 영문 매핑 사전 — 사이트 영문명이 없을 때 가장 정확한 출판명 (최우선)
 FAMOUS_DOCTORS_MAP = {
     # 서울대병원
     "안규리": ["Ahn KR", "Ahn Kyu Ri", "Kyu Ri Ahn", "Kyu-Ri Ahn"],
@@ -27,7 +37,7 @@ FAMOUS_DOCTORS_MAP = {
     "오창완": ["Oh CW", "Oh Chang-Wan", "Chang-Wan Oh"],
 }
 
-# 한글 성의 로마자 표기 매핑
+# 한글 성의 관용 로마자 표기 (PubMed 출판명은 RR이 아닌 관용표기를 따름: Lee/Kim/Park/Yoon …)
 KOREAN_LAST_NAMES = {
     "김": "Kim", "이": "Lee", "박": "Park", "최": "Choi", "정": "Jung",
     "강": "Kang", "조": "Cho", "윤": "Yoon", "장": "Jang", "임": "Lim",
@@ -35,68 +45,102 @@ KOREAN_LAST_NAMES = {
     "황": "Hwang", "안": "Ahn", "송": "Song", "류": "Ryu", "유": "Yoo",
     "홍": "Hong", "전": "Jeon", "고": "Ko", "문": "Moon", "양": "Yang",
     "손": "Sohn", "배": "Bae", "백": "Baek", "허": "Hur", "노": "Noh",
+    "심": "Shim", "남": "Nam", "구": "Koo", "곽": "Kwak", "성": "Sung",
+    "차": "Cha", "주": "Joo", "우": "Woo", "민": "Min", "라": "Ra",
 }
 
-# 한글 초성/중성/종성 로마자 변환을 위한 간이 맵 (이름 변환용)
-KOREAN_SYLLABLE_MAP = {
-    "민": "Min", "준": "Jun", "지": "Ji", "현": "Hyun", "우": "Woo",
-    "아": "Ah", "영": "Young", "수": "Su", "훈": "Hoon", "재": "Jae",
-    "성": "Sung", "호": "Ho", "석": "Seok", "태": "Tae", "동": "Dong",
-    "철": "Chul", "광": "Kwang", "규": "Kyu", "원": "Won", "종": "Jong",
-    "진": "Jin", "선": "Sun", "희": "Hee", "경": "Kyung", "미": "Mi",
-    "은": "Eun", "정": "Jung", "혜": "Hye", "상": "Sang", "창": "Chang",
-    "병": "Byung", "석": "Seok", "용": "Yong", "기": "Ki", "승": "Seung",
-    "관": "Kwan", "율": "Yul", "철": "Cheol", "주": "Joo", "건": "Geon",
-}
+# ─── 한글 자모 분해 → 국립국어원 로마자 표기(RR) ──────────────────
+_CHO = ["g", "kk", "n", "d", "tt", "r", "m", "b", "pp", "s", "ss",
+        "", "j", "jj", "ch", "k", "t", "p", "h"]
+_JUNG = ["a", "ae", "ya", "yae", "eo", "e", "yeo", "ye", "o", "wa", "wae",
+         "oe", "yo", "u", "wo", "we", "wi", "yu", "eu", "ui", "i"]
+_JONG = ["", "k", "k", "k", "n", "n", "n", "t", "l", "k", "m", "l", "l",
+         "l", "p", "l", "m", "p", "p", "t", "t", "ng", "t", "t", "k",
+         "t", "p", "t"]
+
+
+def romanize_syllable(ch: str) -> str:
+    """한글 음절 1자를 로마자로 변환. 예: '정'→'jeong', '환'→'hwan', '렬'→'ryeol'."""
+    code = ord(ch) - 0xAC00
+    if code < 0 or code > 11171:
+        return ch  # 한글 음절이 아니면 그대로
+    cho = code // 588
+    jung = (code % 588) // 28
+    jong = code % 28
+    return _CHO[cho] + _JUNG[jung] + _JONG[jong]
+
+
+def _variants(surname_eng: str, given_parts: list[str]) -> list[str]:
+    """성 + 이름 음절 로마자 조각으로 PubMed 저자 검색 변형을 우선순위대로 생성."""
+    given_parts = [p for p in given_parts if p]
+    if not given_parts:
+        return [surname_eng]
+    initials = "".join(p[0] for p in given_parts).upper()
+    joined = " ".join(given_parts)
+    hyphen = "-".join(given_parts)
+    variants = [
+        f"{surname_eng} {initials}",   # Yoon JH  ← PubMed 'LastName Initials'에 가장 강건
+        f"{surname_eng} {joined}",     # Yoon Jeong Hwan
+        f"{surname_eng} {hyphen}",     # Yoon Jeong-Hwan
+        f"{joined} {surname_eng}",     # Jeong Hwan Yoon
+    ]
+    seen, out = set(), []
+    for v in variants:
+        if v not in seen:
+            seen.add(v)
+            out.append(v)
+    return out
+
 
 def convert_korean_name_to_english(name: str) -> list[str]:
     """
-    한글 의사 이름을 PubMed 검색에 특화된 여러 영문 표기 조합으로 변환하여 리턴한다.
-    예: '안규리' -> ['Ahn KR', 'Ahn Kyu Ri', 'Kyu Ri Ahn', 'Kyu-Ri Ahn']
+    한글 의사 이름 → PubMed 검색용 영문 변형 리스트.
+    예: '윤정환' → ['Yoon JH', 'Yoon Jeong Hwan', 'Yoon Jeong-Hwan', 'Jeong Hwan Yoon']
     """
-    name = name.strip()
+    name = (name or "").strip()
     if not name:
         return []
 
-    # 1. 명의 사전에 존재할 시 즉각 반환
+    # 1) 명의 사전 최우선 (실제 출판명)
     if name in FAMOUS_DOCTORS_MAP:
         return FAMOUS_DOCTORS_MAP[name]
 
-    # 2. 일반 한국인 이름 변환 (3글자 이름 기준)
-    if len(name) == 3:
-        last = name[0]
-        first1 = name[1]
-        first2 = name[2]
+    # 2) 성(1자) + 이름(나머지) 분해. 성은 관용표기 우선, 이름은 RR.
+    surname, given = name[0], name[1:]
+    surname_eng = KOREAN_LAST_NAMES.get(surname) or romanize_syllable(surname).capitalize()
+    given_parts = [romanize_syllable(c).capitalize() for c in given]
+    return _variants(surname_eng, given_parts)
 
-        last_eng = KOREAN_LAST_NAMES.get(last, last)
-        f1_eng = KOREAN_SYLLABLE_MAP.get(first1, "Gildong"[0:3]) # fallback
-        f2_eng = KOREAN_SYLLABLE_MAP.get(first2, "Gildong"[3:6]) # fallback
 
-        # 이니셜 추출
-        f1_init = f1_eng[0] if f1_eng else ""
-        f2_init = f2_eng[0] if f2_eng else ""
+def english_name_to_pubmed_variants(name_en: str) -> list[str]:
+    """
+    병원 사이트가 제공한 영문명을 PubMed 저자 변형으로 변환 (실제 출판명 기반 → 최정확).
+    지원 형식:
+      'Yoon, Jung-Hwan'  (성, 이름 — 서울대/세브란스)
+      'Kang, Huapyong'   (성, 단일이름)
+      'Ga Hee Kim'       (이름 ... 성)
+      'DONGYUN KIM'      (대문자 혼합)
+    """
+    s = (name_en or "").strip()
+    if not s:
+        return []
 
-        combinations = [
-            f"{last_eng} {f1_init}{f2_init}",       # Lee WY, Ahn KR
-            f"{last_eng} {f1_eng} {f2_eng}",       # Lee Woo Yong
-            f"{f1_eng} {f2_eng} {last_eng}",       # Woo Yong Lee
-            f"{f1_eng}-{f2_eng} {last_eng}",       # Woo-Yong Lee
-        ]
-        return combinations
+    surname, given = "", ""
+    if "," in s:
+        a, b = s.split(",", 1)
+        surname, given = a.strip(), b.strip()
+    else:
+        toks = s.split()
+        if len(toks) < 2:
+            return [s]
+        known = {v for v in KOREAN_LAST_NAMES.values()}
+        if toks[-1].capitalize() in known:        # 'Ga Hee Kim' → 성=Kim
+            surname, given = toks[-1], " ".join(toks[:-1])
+        elif toks[0].capitalize() in known:        # 'Kim Ga Hee' → 성=Kim
+            surname, given = toks[0], " ".join(toks[1:])
+        else:                                      # 알 수 없으면 마지막 토큰을 성으로 가정
+            surname, given = toks[-1], " ".join(toks[:-1])
 
-    # 3. 2글자 이름 또는 기타 예외
-    elif len(name) == 2:
-        last = name[0]
-        first = name[1]
-        last_eng = KOREAN_LAST_NAMES.get(last, last)
-        f_eng = KOREAN_SYLLABLE_MAP.get(first, "Jin")
-        f_init = f_eng[0] if f_eng else ""
-
-        return [
-            f"{last_eng} {f_init}",
-            f"{last_eng} {f_eng}",
-            f"{f_eng} {last_eng}",
-        ]
-
-    # 4. 기타
-    return [name]
+    surname = surname.capitalize()
+    given_parts = [p.capitalize() for p in re.split(r"[\s\-]+", given) if p]
+    return _variants(surname, given_parts)
