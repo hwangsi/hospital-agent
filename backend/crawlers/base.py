@@ -795,14 +795,17 @@ class CrawlerOrchestrator:
                 if not result or not result.get("doctors"):
                     print(f"[Crawler:{hospital_id}] Crawl empty or failed. Triggering Premium Fallback DB for {department}...")
                     fallback_docs = self._get_fallback_doctors(hospital_id, department, disease)
-                    result = {"hospital_id": hospital_id, "doctors": fallback_docs}
+                    result = {"hospital_id": hospital_id, "doctors": fallback_docs, "_fallback": True}
             except Exception as e:
                 print(f"[Crawler:{hospital_id}] Crawl crashed: {e}. Triggering Premium Fallback DB...")
                 fallback_docs = self._get_fallback_doctors(hospital_id, department, disease)
-                result = {"hospital_id": hospital_id, "doctors": fallback_docs}
+                result = {"hospital_id": hospital_id, "doctors": fallback_docs, "_fallback": True}
 
-            self._cache[cache_key] = result
-            self._cache_ts[cache_key] = datetime.now()
+            # 실제 크롤 결과만 캐싱한다. 폴백(가짜 데이터)은 캐싱하지 않아
+            # 일시적 크롤 실패가 6시간 동안 가짜로 고착되지 않고 다음 검색에서 재시도된다.
+            if not result.get("_fallback"):
+                self._cache[cache_key] = result
+                self._cache_ts[cache_key] = datetime.now()
             return result
 
     def _get_fallback_doctors(self, hospital_id: str, department: str, disease: str = "") -> list[dict]:
