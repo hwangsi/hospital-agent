@@ -11,3 +11,6 @@ share_content.txt
 share_content.html
 share_content.txt
 scratch_scrape.py
+
+# OMC tooling state
+.omc/
