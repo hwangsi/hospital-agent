@@ -467,8 +467,16 @@ class SMCCrawler(HospitalCrawlerBase):
                     continue
                 seen.add(key)
                 new_count += 1
-                title_spans = c.select("h3.card-content-title span")
-                pos = title_spans[-1].get_text(strip=True) if len(title_spans) > 1 else ""
+                # 직위: h3.card-content-title 의 span 중 이름(name=fullName)·
+                # 진료과 라벨(.treatment-parts)을 제외한 것 (예: 교수/임상강사)
+                pos = ""
+                for sp in c.select("h3.card-content-title span"):
+                    if sp.get("name") == "fullName":
+                        continue
+                    if "treatment-parts" in (sp.get("class") or []):
+                        continue
+                    pos = sp.get_text(strip=True)
+                    break
                 spec_el = c.select_one("p.card-content-text")
                 specialty = spec_el.get_text(" ", strip=True) if spec_el else ""
                 doctors.append(_make_doctor(name, pos, department, specialty, emp_id=dr_no))
