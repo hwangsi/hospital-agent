@@ -71,7 +71,7 @@ input,textarea,button{font-family:inherit}button{cursor:pointer;border:none;outl
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
 <script type="text/babel">
-const{useState,useEffect}=React;
+const{useState,useEffect,useRef}=React;
 const H=[
 {id:"snuh",name:"서울대학교병원",short:"서울대병원",color:"#1B3A5C",accent:"#3B7DD8"},
 {id:"amc",name:"서울아산병원",short:"아산병원",color:"#0D4E2C",accent:"#2EA85A"},
@@ -265,14 +265,30 @@ placeholder="예: 간문부 담관암, 미만성 거대B세포 림프종, 베체
 }
 
 /* ─── S2: Loading ─── */
-function S2({onDone}){
+function S2({onDone,ready}){
 const[p,setP]=useState(0);const[st,setSt]=useState("");
-const stages=["서울대병원 대기정보 조회 중...","서울아산병원 예약현황 수집 중...","삼성서울병원 의료진 수집 중...","세브란스병원 연동 중...","분당서울대병원 조회 중...","심평원(HIRA) 수술건수·사망률 조회 중...","건보공단(NHIS) 진료통계 연동 중...","PubMed / KCI H-index 산출 중...","네이버뉴스 언론노출 집계 중...","분석 완료!"];
-useEffect(()=>{let i=0;const iv=setInterval(()=>{i++;setP(Math.min(i/stages.length*100,100));setSt(stages[Math.min(i-1,stages.length-1)]);if(i>=stages.length){clearInterval(iv);setTimeout(onDone,600);}},550);return()=>clearInterval(iv);},[]);
+const[waiting,setWaiting]=useState(false);
+const stages=["서울대병원 대기정보 조회 중...","서울아산병원 예약현황 수집 중...","삼성서울병원 의료진 수집 중...","세브란스병원 연동 중...","분당서울대병원 조회 중...","심평원(HIRA) 수술건수·사망률 조회 중...","건보공단(NHIS) 진료통계 연동 중...","PubMed / KCI H-index 산출 중...","네이버뉴스 언론노출 집계 중..."];
+// 실제 데이터가 도착했는지를 ref로 추적 (인터벌 안에서 최신값 참조)
+const readyRef=useRef(ready);
+useEffect(()=>{readyRef.current=ready;},[ready]);
+useEffect(()=>{let i=0;const iv=setInterval(()=>{
+  if(i<stages.length){
+    // 애니메이션 단계 진행 — 단, 실데이터 대기를 위해 95%에서 멈춤
+    i++;setP(Math.min(i/stages.length*95,95));setSt(stages[Math.min(i-1,stages.length-1)]);
+  } else if(readyRef.current){
+    // 단계 완료 + 실데이터 도착 → 100% 후 결과로
+    setP(100);setSt("분석 완료!");setWaiting(false);
+    clearInterval(iv);setTimeout(onDone,400);
+  } else {
+    // 단계는 끝났지만 실데이터 미도착 → 로딩 유지
+    setP(95);setWaiting(true);setSt("실제 의료진 데이터 수집 중...");
+  }
+},550);return()=>clearInterval(iv);},[]);
 return(<div style={{textAlign:'center',padding:'60px 20px'}}>
 <div className="spinner"/><div style={{fontSize:15,fontWeight:600,marginBottom:16}}>{st}</div>
 <div className="progress-bar"><div className="progress-fill" style={{width:`${p}%`}}/></div>
-<div style={{fontSize:12,color:'var(--ink3)',marginTop:8}}>{Math.round(p)}%</div>
+<div style={{fontSize:12,color:'var(--ink3)',marginTop:8}}>{waiting?"5개 병원 실시간 크롤링·논문지표 조회 중 (최대 40초 소요)":`${Math.round(p)}%`}</div>
 </div>);}
 
 /* ─── S3: Results ─── */
@@ -494,13 +510,15 @@ const[doc,setDoc]=useState(null);
 const[res,setRes]=useState(null);
 const[doctors,setDoctors]=useState([]);
 const[backendOffline,setBackendOffline]=useState(false);
+const[searchDone,setSearchDone]=useState(false);
 const steps=["환자정보","검색","결과확인","예약","완료"];
 
 const startSearch = async () => {
   setStep(1);
   setDoctors([]);
   setBackendOffline(false);
-  
+  setSearchDone(false);
+
   const searchParams = {
     disease: pd.disease || "",
     department: pd.department || "",
@@ -546,6 +564,8 @@ const startSearch = async () => {
   } catch (err) {
     console.warn("Backend server is offline or failed. Falling back to in-browser simulation.", err);
     setBackendOffline(true);
+  } finally {
+    setSearchDone(true);
   }
 };
 
@@ -606,7 +626,7 @@ return(<div>
 <div className="container">
 <Steps current={step>1?step-1:step} steps={steps}/>
 {step===0&&<S1 data={pd} onChange={setPd} onNext={startSearch}/>}
-{step===1&&<S2 onDone={()=>setStep(2)}/>}
+{step===1&&<S2 onDone={()=>setStep(2)} ready={searchDone}/>}
 {step===2&&<S3 patientData={pd} doctors={doctors} onSelect={d=>{setDoc(d);setStep(3);}}/>}
 {step===3&&doc&&<S4 doctor={doc} patientData={pd} onBack={()=>setStep(2)} onConfirm={confirmReservation}/>}
 {step===4&&res&&<S5 reservation={res} onReset={()=>{setStep(0);setPd({});setDoc(null);setRes(null);setDoctors([]);}}/>}
