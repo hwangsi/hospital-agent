@@ -276,13 +276,17 @@ return(<div style={{textAlign:'center',padding:'60px 20px'}}>
 </div>);}
 
 /* ─── S3: Results ─── */
-function S3({patientData:pd,onSelect}){
+function S3({patientData:pd,doctors:all=[],onSelect}){
 const[sortBy,setSort]=useState("wait");
 const[expId,setExp]=useState(null);
 const[showH,setSH]=useState(null);
 const dept=pd.department||"소화기내과";
-const all=H.flatMap(h=>genDocs(h.id,dept,pd.disease));
-const sorted=[...all].sort((a,b)=>{
+const doctorsList = all.length > 0 ? all : H.flatMap(h=>genDocs(h.id,dept,pd.disease));
+const getHospitalHira = (hid) => {
+  const docWithHira = doctorsList.find(d => d.hospitalId === hid && d.hiraData);
+  return docWithHira ? docWithHira.hiraData : mkHira(hid, pd.disease);
+};
+const sorted=[...doctorsList].sort((a,b)=>{
 if(sortBy==="wait")return a.waitDays-b.waitDays;
 if(sortBy==="hindex")return b.hIndex-a.hIndex;
 if(sortBy==="news")return b.newsCount-a.newsCount;
@@ -295,14 +299,14 @@ return(<div>
 <div className="hira-strip">
 <div style={{fontWeight:700,marginBottom:8,fontSize:13}}>🏛 심평원·건보공단 병원별 수술실적 ({pd.disease})</div>
 <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-{H.map(h=>{const hr=mkHira(h.id,pd.disease);return(
+{H.map(h=>{const hr=getHospitalHira(h.id);return(
 <button key={h.id} onClick={()=>setSH(showH===h.id?null:h.id)}
 style={{padding:'6px 10px',borderRadius:8,border:`1px solid ${h.accent}40`,background:showH===h.id?`${h.accent}15`:'#fff',cursor:'pointer',fontSize:11,display:'flex',alignItems:'center',gap:5,transition:'all .15s'}}>
 <span style={{fontWeight:700,color:h.color}}>{h.short}</span>
 <span style={{color:'var(--ink2)'}}>{hr.annualSurgeries}건</span>
 </button>);})}
 </div>
-{showH&&(()=>{const h=gh(showH),hr=mkHira(showH,pd.disease);return(
+{showH&&(()=>{const h=gh(showH),hr=getHospitalHira(showH);return(
 <div className="hira-detail" style={{borderColor:`${h.accent}30`}}>
 <div style={{fontWeight:800,fontSize:14,color:h.color,marginBottom:10}}>{h.name} — {pd.disease}</div>
 <div className="three-col" style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:12}}>
@@ -472,7 +476,14 @@ return(<div style={{textAlign:'center',padding:'20px 0'}}>
 )}
 </div></div>
 <div className="info-box yellow" style={{marginBottom:24}}>💡 <b>안내:</b> 병원에서 확인 연락이 올 수 있습니다. 건강보험증 및 진료기록을 준비해주세요.</div>
-<button className="btn btn-primary btn-big" onClick={onReset}>새로운 예약 →</button>
+{rv.redirectUrl && (
+  <a href={rv.redirectUrl} target="_blank" rel="noopener noreferrer" style={{textDecoration:'none', display:'block', marginBottom:12}}>
+    <button className="btn btn-primary btn-big" style={{background:h.color, boxShadow:'0 6px 20px rgba(0,0,0,.15)'}}>
+      🔗 병원 공식 사이트에서 예약 완료하기 (본인인증)
+    </button>
+  </a>
+)}
+<button className={`btn ${rv.redirectUrl ? 'btn-secondary' : 'btn-primary'} btn-big`} onClick={onReset}>새로운 예약 →</button>
 </div>);}
 
 /* ─── App ─── */
@@ -481,7 +492,111 @@ const[step,setStep]=useState(0);
 const[pd,setPd]=useState({});
 const[doc,setDoc]=useState(null);
 const[res,setRes]=useState(null);
+const[doctors,setDoctors]=useState([]);
+const[backendOffline,setBackendOffline]=useState(false);
 const steps=["환자정보","검색","결과확인","예약","완료"];
+
+const startSearch = async () => {
+  setStep(1);
+  setDoctors([]);
+  setBackendOffline(false);
+  
+  const searchParams = {
+    disease: pd.disease || "",
+    department: pd.department || "",
+    purpose: pd.purpose || "",
+    age: parseInt(pd.age) || 0,
+    gender: pd.gender || ""
+  };
+  
+  try {
+    const response = await fetch('http://127.0.0.1:8000/api/search', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(searchParams)
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Server returned status ${response.status}`);
+    }
+    
+    const data = await response.json();
+    if (data && data.doctors) {
+      const mapped = data.doctors.map(doc => ({
+        id: doc.id,
+        name: doc.name,
+        position: doc.position,
+        hospitalId: doc.hospital_id,
+        specialty: doc.department,
+        hIndex: doc.h_index,
+        waitDays: doc.wait_days,
+        newsCount: doc.news_count,
+        papers: doc.papers,
+        citations: doc.citations,
+        docSurgeries: doc.doc_surgeries,
+        hiraData: doc.hira_data,
+        slots: doc.available_slots.map(s => ({ date: s.date, time: s.time }))
+      }));
+      setDoctors(mapped);
+    } else {
+      throw new Error("No doctors in search response");
+    }
+  } catch (err) {
+    console.warn("Backend server is offline or failed. Falling back to in-browser simulation.", err);
+    setBackendOffline(true);
+  }
+};
+
+const confirmReservation = async (reservationData) => {
+  const localReservation = {
+    ...reservationData,
+    doctor: reservationData.doctor,
+    slot: reservationData.slot,
+    patientName: reservationData.patientName,
+    phone: reservationData.phone,
+    notes: reservationData.notes,
+    address: reservationData.address
+  };
+  setRes(localReservation);
+  setStep(4);
+  
+  try {
+    const reserveParams = {
+      doctor_id: reservationData.doctor.id,
+      hospital_id: reservationData.doctor.hospitalId,
+      slot_date: reservationData.slot.date,
+      slot_time: reservationData.slot.time,
+      patient_name: reservationData.patientName,
+      phone: reservationData.phone,
+      ssn: reservationData.ssn || null,
+      address: reservationData.address || null,
+      notes: reservationData.notes || null
+    };
+    
+    const response = await fetch('http://127.0.0.1:8000/api/reserve', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(reserveParams)
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (data && data.success && data.redirect_url) {
+        setRes(prev => ({
+          ...prev,
+          redirectUrl: data.redirect_url
+        }));
+      }
+    }
+  } catch (err) {
+    console.warn("Backend reserve call failed, utilizing local fallback.", err);
+  }
+};
+
 return(<div>
 <div className="header"><div className="header-inner">
 <div className="header-tag">BIG 5 HOSPITAL AGENT</div>
@@ -490,11 +605,11 @@ return(<div>
 </div></div>
 <div className="container">
 <Steps current={step>1?step-1:step} steps={steps}/>
-{step===0&&<S1 data={pd} onChange={setPd} onNext={()=>setStep(1)}/>}
+{step===0&&<S1 data={pd} onChange={setPd} onNext={startSearch}/>}
 {step===1&&<S2 onDone={()=>setStep(2)}/>}
-{step===2&&<S3 patientData={pd} onSelect={d=>{setDoc(d);setStep(3);}}/>}
-{step===3&&doc&&<S4 doctor={doc} patientData={pd} onBack={()=>setStep(2)} onConfirm={r=>{setRes(r);setStep(4);}}/>}
-{step===4&&res&&<S5 reservation={res} onReset={()=>{setStep(0);setPd({});setDoc(null);setRes(null);}}/>}
+{step===2&&<S3 patientData={pd} doctors={doctors} onSelect={d=>{setDoc(d);setStep(3);}}/>}
+{step===3&&doc&&<S4 doctor={doc} patientData={pd} onBack={()=>setStep(2)} onConfirm={confirmReservation}/>}
+{step===4&&res&&<S5 reservation={res} onReset={()=>{setStep(0);setPd({});setDoc(null);setRes(null);setDoctors([]);}}/>}
 </div>
 </div>);}
 
