@@ -59,11 +59,15 @@ class DoctorResult(BaseModel):
     h_index: int
     wait_days: int
     news_count: int
-    papers: int
-    citations: int
+    papers: int             # PubMed(국제) 논문 수
+    citations: int          # PubMed(국제) 피인용 수
+    kci_papers: int = 0     # KCI(국내) 논문 수
+    kci_citations: int = 0  # KCI(국내) 피인용 수
     doc_surgeries: int
     hira_data: dict
     available_slots: list
+    emp_id: str = ""             # 병원 내부 의사 식별자 (예: 아산 empId)
+    reservation_url: str = ""    # 의사 프리필 예약 URL (가능한 경우)
 
 class ReservationRequest(BaseModel):
     doctor_id: str
@@ -138,7 +142,7 @@ async def _fetch_hospital_data(
     hira_task = hira_client.get_surgery_stats(hospital_id, kcd_code)
 
     # 2) 병원 크롤링 (의사 목록 + 대기일)
-    crawl_task = crawler.crawl_hospital(hospital_id, department)
+    crawl_task = crawler.crawl_hospital(hospital_id, department, disease)
 
     # 3) 결과 대기
     hira_data, crawl_data = await asyncio.gather(
@@ -171,18 +175,26 @@ async def _enrich_doctor(doc: dict, hospital_id: str, hira_data: dict) -> dict:
         "snubh": "분당서울대병원",
     }
 
-    # PubMed + KCI + Naver 동시
+    # PubMed(국제) + Naver(뉴스) + KCI(국내) 동시 호출
     pubmed_task = pubmed_client.get_h_index(doc["name"], hospital_names[hospital_id])
     naver_task = naver_client.get_news_count(doc["name"], hospital_names[hospital_id])
+    kci_task = kci_client.search_papers(doc["name"], hospital_names[hospital_id])
 
-    pub_result, news_count = await asyncio.gather(
-        pubmed_task, naver_task, return_exceptions=True
+    pub_result, news_count, kci_result = await asyncio.gather(
+        pubmed_task, naver_task, kci_task, return_exceptions=True
     )
 
     if isinstance(pub_result, Exception):
         pub_result = {"h_index": 0, "papers": 0, "citations": 0}
     if isinstance(news_count, Exception):
         news_count = 0
+    if isinstance(kci_result, Exception):
+        print(f"[KCI] enrich error for {doc.get('name')}: {kci_result}")
+        kci_result = {"total": 0, "papers": []}
+
+    # KCI 국내 논문 지표 집계
+    kci_papers = kci_result.get("total", 0)
+    kci_citations = sum(p.get("citations", 0) for p in kci_result.get("papers", []))
 
     return {
         "id": f"{hospital_id}-{doc.get('name', 'unknown')}",
@@ -196,9 +208,13 @@ async def _enrich_doctor(doc: dict, hospital_id: str, hira_data: dict) -> dict:
         "news_count": news_count,
         "papers": pub_result.get("papers", 0),
         "citations": pub_result.get("citations", 0),
+        "kci_papers": kci_papers,
+        "kci_citations": kci_citations,
         "doc_surgeries": doc.get("surgeries", 0),
         "hira_data": hira_data,
         "available_slots": doc.get("available_slots", []),
+        "emp_id": doc.get("emp_id", ""),
+        "reservation_url": doc.get("reservation_url", ""),
     }
 
 
