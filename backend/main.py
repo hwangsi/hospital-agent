@@ -102,6 +102,11 @@ async def search_doctors(req: SearchRequest):
     department = req.department or disease_info.get("department", "내과")
     kcd_code = disease_info.get("kcd_code", "")
 
+    # 진료 목적이 '수술'/'합병증 치료'면 해당 질환의 외과로 라우팅 (명시 선택보다 우선).
+    # 예: 위암 + 수술 → 소화기내과(내과)가 아니라 위장관외과로 검색.
+    if req.purpose in ("surgery", "complication") and disease_info.get("surgery_dept"):
+        department = disease_info["surgery_dept"]
+
     hospital_ids = ["snuh", "amc", "smc", "sev", "snubh"]
 
     # 병렬 실행: 크롤링 + API 동시 호출

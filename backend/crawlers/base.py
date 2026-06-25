@@ -789,21 +789,22 @@ class CrawlerOrchestrator:
             if not crawler:
                 return {"doctors": [], "error": f"Unknown hospital: {hospital_id}"}
 
+            failed = False
             try:
                 result = await crawler.crawl(department)
-                # 만약 크롤링된 의사 수가 0명이거나 에러가 있으면 고성능 Fallback DB 가동
+                # 크롤 결과가 비었으면 실패로 간주 — 가짜 의사를 만들지 않고 빈 결과 반환
                 if not result or not result.get("doctors"):
-                    print(f"[Crawler:{hospital_id}] Crawl empty or failed. Triggering Premium Fallback DB for {department}...")
-                    fallback_docs = self._get_fallback_doctors(hospital_id, department, disease)
-                    result = {"hospital_id": hospital_id, "doctors": fallback_docs, "_fallback": True}
+                    print(f"[Crawler:{hospital_id}] Crawl empty/failed for {department} — returning empty (no dummy).")
+                    result = {"hospital_id": hospital_id, "doctors": []}
+                    failed = True
             except Exception as e:
-                print(f"[Crawler:{hospital_id}] Crawl crashed: {e}. Triggering Premium Fallback DB...")
-                fallback_docs = self._get_fallback_doctors(hospital_id, department, disease)
-                result = {"hospital_id": hospital_id, "doctors": fallback_docs, "_fallback": True}
+                print(f"[Crawler:{hospital_id}] Crawl crashed: {e} — returning empty (no dummy).")
+                result = {"hospital_id": hospital_id, "doctors": []}
+                failed = True
 
-            # 실제 크롤 결과만 캐싱한다. 폴백(가짜 데이터)은 캐싱하지 않아
-            # 일시적 크롤 실패가 6시간 동안 가짜로 고착되지 않고 다음 검색에서 재시도된다.
-            if not result.get("_fallback"):
+            # 실제 의사를 찾은 경우에만 캐싱한다. 빈/실패 결과는 캐싱하지 않아
+            # 일시적 실패가 6시간 고착되지 않고 다음 검색에서 재시도된다.
+            if not failed:
                 self._cache[cache_key] = result
                 self._cache_ts[cache_key] = datetime.now()
             return result

@@ -297,10 +297,18 @@ const[sortBy,setSort]=useState("wait");
 const[expId,setExp]=useState(null);
 const[showH,setSH]=useState(null);
 const dept=pd.department||"소화기내과";
-const doctorsList = all.length > 0 ? all : H.flatMap(h=>genDocs(h.id,dept,pd.disease));
+// 실제 백엔드 데이터만 사용 — 더미(genDocs) 생성하지 않음
+const doctorsList = all;
+if(doctorsList.length===0){
+  return(<div>
+    <h2 style={{fontSize:22,fontWeight:800,marginBottom:4}}>검색 결과</h2>
+    <p style={{color:'var(--ink3)',fontSize:13,marginBottom:16}}>{pd.disease} · {PU.find(p=>p.id===pd.purpose)?.label}</p>
+    <div className="info-box yellow">😕 검색된 의료진이 없습니다. 백엔드 연결 상태를 확인하거나 잠시 후 다시 시도해주세요.</div>
+  </div>);
+}
 const getHospitalHira = (hid) => {
   const docWithHira = doctorsList.find(d => d.hospitalId === hid && d.hiraData);
-  return docWithHira ? docWithHira.hiraData : mkHira(hid, pd.disease);
+  return docWithHira ? docWithHira.hiraData : null;
 };
 const sorted=[...doctorsList].sort((a,b)=>{
 if(sortBy==="wait")return a.waitDays-b.waitDays;
@@ -319,10 +327,10 @@ return(<div>
 <button key={h.id} onClick={()=>setSH(showH===h.id?null:h.id)}
 style={{padding:'6px 10px',borderRadius:8,border:`1px solid ${h.accent}40`,background:showH===h.id?`${h.accent}15`:'#fff',cursor:'pointer',fontSize:11,display:'flex',alignItems:'center',gap:5,transition:'all .15s'}}>
 <span style={{fontWeight:700,color:h.color}}>{h.short}</span>
-<span style={{color:'var(--ink2)'}}>{hr.annualSurgeries}건</span>
+<span style={{color:'var(--ink2)'}}>{hr?`${hr.annualSurgeries}건`:'—'}</span>
 </button>);})}
 </div>
-{showH&&(()=>{const h=gh(showH),hr=getHospitalHira(showH);return(
+{showH&&(()=>{const h=gh(showH),hr=getHospitalHira(showH);if(!hr)return null;return(
 <div className="hira-detail" style={{borderColor:`${h.accent}30`}}>
 <div style={{fontWeight:800,fontSize:14,color:h.color,marginBottom:10}}>{h.name} — {pd.disease}</div>
 <div className="three-col" style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:12}}>

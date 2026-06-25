@@ -11,27 +11,28 @@
 # 주요 질환 → KCD 코드 매핑 (약 200개 — 실서비스는 전체 DB 사용)
 KCD_MAP = {
     # ─── 소화기 ───
-    "위암": {"kcd": "C16", "dept": "소화기내과", "surgery_code": "Q2631"},
-    "대장암": {"kcd": "C18", "dept": "소화기내과", "surgery_code": "Q2891"},
-    "간암": {"kcd": "C22", "dept": "소화기내과", "surgery_code": "Q0561"},
-    "췌장암": {"kcd": "C25", "dept": "소화기내과", "surgery_code": "Q2621"},
-    "담관암": {"kcd": "C24", "dept": "소화기내과", "surgery_code": "Q2611"},
-    "간문부 담관암": {"kcd": "C24.0", "dept": "소화기내과", "surgery_code": "Q2611"},
+    # surgery_dept: 진료 목적이 '수술'일 때 라우팅할 외과 진료과
+    "위암": {"kcd": "C16", "dept": "소화기내과", "surgery_dept": "위장관외과", "surgery_code": "Q2631"},
+    "대장암": {"kcd": "C18", "dept": "소화기내과", "surgery_dept": "대장항문외과", "surgery_code": "Q2891"},
+    "간암": {"kcd": "C22", "dept": "소화기내과", "surgery_dept": "간담췌외과", "surgery_code": "Q0561"},
+    "췌장암": {"kcd": "C25", "dept": "소화기내과", "surgery_dept": "간담췌외과", "surgery_code": "Q2621"},
+    "담관암": {"kcd": "C24", "dept": "소화기내과", "surgery_dept": "간담췌외과", "surgery_code": "Q2611"},
+    "간문부 담관암": {"kcd": "C24.0", "dept": "소화기내과", "surgery_dept": "간담췌외과", "surgery_code": "Q2611"},
     "GERD": {"kcd": "K21", "dept": "소화기내과"},
     "IBD": {"kcd": "K50", "dept": "소화기내과"},
     "간경변": {"kcd": "K74", "dept": "소화기내과"},
 
     # ─── 호흡기 ───
-    "폐암": {"kcd": "C34", "dept": "호흡기내과", "surgery_code": "Q3391"},
+    "폐암": {"kcd": "C34", "dept": "호흡기내과", "surgery_dept": "흉부외과", "surgery_code": "Q3391"},
     "천식": {"kcd": "J45", "dept": "호흡기내과"},
     "COPD": {"kcd": "J44", "dept": "호흡기내과"},
     "폐섬유증": {"kcd": "J84", "dept": "호흡기내과"},
 
     # ─── 순환기 ───
-    "관상동맥질환": {"kcd": "I25", "dept": "순환기내과", "surgery_code": "O1641"},
+    "관상동맥질환": {"kcd": "I25", "dept": "순환기내과", "surgery_dept": "흉부외과", "surgery_code": "O1641"},
     "심부전": {"kcd": "I50", "dept": "순환기내과"},
     "부정맥": {"kcd": "I49", "dept": "순환기내과"},
-    "판막질환": {"kcd": "I34", "dept": "순환기내과", "surgery_code": "O1981"},
+    "판막질환": {"kcd": "I34", "dept": "순환기내과", "surgery_dept": "흉부외과", "surgery_code": "O1981"},
 
     # ─── 내분비 ───
     "당뇨병": {"kcd": "E11", "dept": "내분비내과"},
@@ -161,6 +162,7 @@ class KCDMapper:
                 "matched": text,
                 "kcd_code": info["kcd"],
                 "department": info["dept"],
+                "surgery_dept": info.get("surgery_dept", ""),
                 "surgery_code": info.get("surgery_code", ""),
             }
 
@@ -172,6 +174,7 @@ class KCDMapper:
                     "matched": disease,
                     "kcd_code": info["kcd"],
                     "department": info["dept"],
+                    "surgery_dept": info.get("surgery_dept", ""),
                     "surgery_code": info.get("surgery_code", ""),
                 }
 
