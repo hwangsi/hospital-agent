@@ -240,7 +240,7 @@ placeholder="예: 간문부 담관암, 미만성 거대B세포 림프종, 베체
 function S2({onDone,ready}){
 const[p,setP]=useState(0);const[st,setSt]=useState("");
 const[waiting,setWaiting]=useState(false);
-const stages=["서울대병원 대기정보 조회 중...","서울아산병원 예약현황 수집 중...","삼성서울병원 의료진 수집 중...","세브란스병원 연동 중...","분당서울대병원 조회 중...","심평원(HIRA) 수술건수·사망률 조회 중...","건보공단(NHIS) 진료통계 연동 중...","PubMed / KCI H-index 산출 중...","네이버뉴스 언론노출 집계 중..."];
+const stages=["서울대병원 대기정보 조회 중...","서울아산병원 예약현황 수집 중...","삼성서울병원 의료진 수집 중...","세브란스병원 연동 중...","분당서울대병원 조회 중...","심평원(HIRA) 수술건수·사망률 조회 중...","건보공단(NHIS) 진료통계 연동 중...","PubMed H-index 산출 중...","네이버뉴스 언론노출 집계 중..."];
 // 실제 데이터가 도착했는지를 ref로 추적 (인터벌 안에서 최신값 참조)
 const readyRef=useRef(ready);
 useEffect(()=>{readyRef.current=ready;},[ready]);

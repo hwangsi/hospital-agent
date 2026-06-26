@@ -20,10 +20,6 @@ NAVER_SEARCH_URL = "https://openapi.naver.com/v1/search/news.json"
 NCBI_API_KEY = os.getenv("NCBI_API_KEY", "")  # 선택사항, 없으면 rate limit 3/sec
 NCBI_BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
-# ─── KCI (한국학술지인용색인) ────────────────────────
-KCI_API_KEY = os.getenv("KCI_API_KEY", "YOUR_KCI_API_KEY")
-KCI_BASE_URL = "https://open.kci.go.kr/po/openapi/openApiSearch.kci"
-
 # ─── 병원 예약 페이지 URL ────────────────────────────
 HOSPITAL_URLS = {
     "snuh": {
