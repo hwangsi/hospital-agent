@@ -40,6 +40,12 @@ def _ssl_ctx() -> ssl.SSLContext:
     return ctx
 
 
+def _is_initials_variant(v: str) -> bool:
+    """'Park SH' / 'Lee J' 처럼 성+이니셜 형태인지 — 동명이인 과다집계를 유발한다."""
+    import re
+    return bool(re.match(r"^[A-Za-z\-]+\s+[A-Z]{1,3}$", (v or "").strip()))
+
+
 class PubMedClient:
     """PubMed E-utilities + NIH iCite 기반 H-index 산출"""
 
@@ -60,22 +66,26 @@ class PubMedClient:
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        affiliations = HOSPITAL_AFFILIATIONS.get(hospital_name, [hospital_name])
+        all_affils = HOSPITAL_AFFILIATIONS.get(hospital_name, [hospital_name])
 
         try:
-            # 병원 제공 영문명이 있으면 그것을, 없으면 한글→로마자 변환을 사용
-            eng_names = english_name_to_pubmed_variants(name_en) if name_en else []
-            if not eng_names:
-                eng_names = convert_korean_name_to_english(doctor_name)
+            if name_en:
+                # 권위 영문명(영문 명단 등재 = 주로 정교수급) → 풀 변형 + 넓은 소속(대학 포함)
+                eng_names = english_name_to_pubmed_variants(name_en)
+                affiliations = all_affils
+            else:
+                # 영문명 미상(주로 임상강사) → 동명이인 과다집계 방지:
+                # 이니셜형('Park SH') 제외한 풀네임 변형만 + 병원 소속만(대학 제외).
+                variants = convert_korean_name_to_english(doctor_name)
+                full = [v for v in variants if not _is_initials_variant(v)]
+                eng_names = full or variants
+                affiliations = all_affils[:1]
 
-            pmids = []
-            if eng_names:
-                pmids = await self._search_papers(eng_names, affiliations)
+            pmids = await self._search_papers(eng_names, affiliations) if eng_names else []
 
-            # 만약 검색 결과가 없거나 API 호출 제한에 도달한 경우,
-            # deterministic hash를 이용한 고품질 모의 Fallback 데이터를 제공합니다.
+            # 검색 0건 → 가짜 해시값 대신 정직하게 0 (임상강사는 출판 이력이 적거나 영문명 불일치)
             if not pmids:
-                result = self._get_fallback_stats(doctor_name, hospital_name)
+                result = {"h_index": 0, "papers": 0, "citations": 0}
                 self._cache[cache_key] = result
                 return result
 
@@ -84,7 +94,7 @@ class PubMedClient:
             h_index = sum(1 for i, c in enumerate(citation_counts) if c >= i + 1)
 
             result = {
-                "h_index": max(1, h_index),
+                "h_index": h_index,
                 "papers": len(pmids),
                 "citations": sum(citation_counts),
             }
@@ -92,10 +102,9 @@ class PubMedClient:
             return result
 
         except Exception as e:
-            print(f"[PubMed] Error for {doctor_name}, using Fallback: {e}")
-            result = self._get_fallback_stats(doctor_name, hospital_name)
-            self._cache[cache_key] = result
-            return result
+            # 일시적 오류 → 가짜 대신 0, 단 캐싱하지 않아 다음 검색에서 재시도
+            print(f"[PubMed] Error for {doctor_name}: {e}")
+            return {"h_index": 0, "papers": 0, "citations": 0}
 
     async def _search_papers(self, eng_names: list[str], affiliations: list[str]) -> list[str]:
         """PubMed esearch — 여러 영문 저자명 조합 + 소속으로 PMID 목록 반환"""
@@ -158,20 +167,3 @@ class PubMedClient:
                 await asyncio.sleep(0.1)   # polite pool 호출 간격
 
         return [counts_map.get(pid, 0) for pid in pmids]
-
-    def _get_fallback_stats(self, doctor_name: str, hospital_name: str) -> dict:
-        """이름의 해시를 이용한 고품질 모의 H-index 데이터셋 반환"""
-        val = sum(ord(c) for c in doctor_name + hospital_name)
-        # H-index 범위: 12 ~ 52
-        h_index = 12 + (val % 41)
-        # 논문 수 범위: 25 ~ 185
-        papers = 25 + (val * 7 % 161)
-        # 피인용 수: 대략 H-index의 제곱 이상
-        citations = int(h_index * h_index * 1.5 + (val % 300))
-        
-        return {
-            "h_index": h_index,
-            "papers": papers,
-            "citations": citations,
-            "source": "Academic Simulation DB (Fallback)"
-        }
