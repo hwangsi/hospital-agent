@@ -59,8 +59,7 @@ def _norm(s: str) -> str:
 
 CSV_COLUMNS = (
     "hospital_id,kcd_code,annualSurgeries,annualCases,mortalityRate,"
-    "complicationRate,readmissionRate,avgLOS,surgeries_2023,surgeries_2024,"
-    "surgeries_2025,dataYear,source"
+    "complicationRate,readmissionRate,avgLOS,trend,dataYear,source"
 )
 
 
@@ -150,6 +149,16 @@ class HIRAClient:
             except (ValueError, TypeError):
                 return 0.0
 
+        # trend 컬럼 형식: "YYYY:count|YYYY:count|..." (연도 명시, 병원별 가용연도 상이)
+        trend = []
+        for part in str(row.get("trend", "") or "").split("|"):
+            y, sep, v = part.partition(":")
+            if sep:
+                try:
+                    trend.append({"year": int(y.strip()), "surgeries": int(float(v.strip()))})
+                except (ValueError, TypeError):
+                    pass
+
         return {
             "annualSurgeries":  _i("annualSurgeries"),
             "annualCases":      _i("annualCases"),
@@ -157,14 +166,10 @@ class HIRAClient:
             "complicationRate": _f("complicationRate"),
             "readmissionRate":  _f("readmissionRate"),
             "avgLOS":           _i("avgLOS"),
-            "trend": [
-                {"year": 2023, "surgeries": _i("surgeries_2023")},
-                {"year": 2024, "surgeries": _i("surgeries_2024")},
-                {"year": 2025, "surgeries": _i("surgeries_2025")},
-            ],
-            "dataYear":   str(row.get("dataYear", "2025")),
-            "isEstimate": False,
-            "source":     row.get("source") or "HIRA 공개통계 (data/hira_stats.csv)",
+            "trend":            trend,
+            "dataYear":         str(row.get("dataYear", "") or ""),
+            "isEstimate":       False,
+            "source":           row.get("source") or "병원 공식 통계 (data/hira_stats.csv)",
         }
 
     # ──────────────────────────────────────────────────
