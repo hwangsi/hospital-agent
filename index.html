@@ -139,36 +139,8 @@ const PU=[
 {id:"complication",label:"합병증 치료",icon:"⚕️",desc:"치료 후 합병증 관리"},
 ];
 
-function mkHira(hid,dis){
-const s=(hid+dis).split("").reduce((a,c)=>a+c.charCodeAt(0),0);
-const r=n=>((s*9301+49297+n*173)%233280)/233280;
-const f={snuh:1.1,amc:1.25,smc:1.05,sev:0.95,snubh:0.8}[hid]||1;
-const as_=Math.floor(80+r(1)*600*f);
-return{annualSurgeries:as_,annualCases:Math.floor(as_*(1.5+r(2)*2)),
-mortalityRate:parseFloat(Math.max(0.1,(2.5-r(3)*2.2)).toFixed(1)),
-complicationRate:parseFloat(Math.max(1,(8-r(4)*6)).toFixed(1)),
-readmissionRate:parseFloat(Math.max(1,(10-r(5)*7)).toFixed(1)),
-avgLOS:Math.floor(4+r(6)*12),
-trend:[0,1,2].map(y=>({year:2023+y,surgeries:Math.floor(as_*(0.85+r(10+y)*0.3))})),
-dataYear:"2025",source:"심평원 + 건보공단"};
-}
-
-function genDocs(hid,sp,dis){
-const s=(hid+sp+dis).split("").reduce((a,c)=>a+c.charCodeAt(0),0);
-const r=n=>((s*9301+49297+n*233)%233280)/233280;
-const ln=["김","이","박","최","정","강","조","윤","장","임","한","오","서","신","권","황"];
-const fn=["영수","지훈","성호","민재","준혁","태현","동욱","상훈","정민","은경","수진","혜원","미란","지현"];
-const cnt=2+Math.floor(r(0)*2),docs=[],hd=mkHira(hid,dis);
-for(let i=0;i<cnt;i++){
-const hi=Math.floor(15+r(i*10+1)*55),wd=Math.floor(3+r(i*10+2)*45);
-const nc=Math.floor(r(i*10+3)*80),pp=Math.floor(20+r(i*10+4)*180);
-const nm=ln[Math.floor(r(i*10+5)*ln.length)]+fn[Math.floor(r(i*10+6)*fn.length)];
-const pos=hi>45?"교수":hi>30?"부교수":"조교수";
-const ds=Math.floor(hd.annualSurgeries*(0.15+r(i*10+11)*0.35)/cnt);
-docs.push({id:`${hid}-${i}`,name:nm,position:pos,hospitalId:hid,specialty:sp,hIndex:hi,waitDays:wd,newsCount:nc,papers:pp,
-citations:Math.floor(pp*(3+r(i*10+7)*15)),docSurgeries:ds,hiraData:hd,
-slots:[{date:nxtD(wd),time:["09:00","10:30","14:00","15:30"][Math.floor(r(i*10+8)*4)]},{date:nxtD(wd+7),time:["09:30","11:00","14:30","16:00"][Math.floor(r(i*10+9)*4)]}]});}
-return docs;}
+/* 더미 의사·HIRA 생성기(genDocs/mkHira)는 제거됨 —
+   실제 백엔드 데이터만 표시하며, 로딩 중에는 더미 대신 진행 상태를 보여준다. */
 
 function nxtD(d){const dt=new Date();dt.setDate(dt.getDate()+d);while(dt.getDay()===0||dt.getDay()===6)dt.setDate(dt.getDate()+1);return dt.toISOString().split("T")[0];}
 function fD(s){const d=new Date(s);return`${d.getMonth()+1}/${d.getDate()}(${"일월화수목금토"[d.getDay()]})`;}
