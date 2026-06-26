@@ -45,7 +45,9 @@ class NaverNewsClient:
             return count
 
         short = SHORT_NAMES.get(hospital_name, hospital_name)
-        query = f'"{doctor_name}" "{short}"'
+        # "의사명 교수" 정확구 + 병원명 → 동명이인·부고 등 무관 기사를 걸러냄
+        # (예: '윤정환' '서울대병원'은 장례식장 부고가 다수 매칭되어 248건 → 80건의 의사 관련 기사로 정밀화)
+        query = f'"{doctor_name} 교수" "{short}"'
 
         try:
             ssl_ctx = ssl.create_default_context()
@@ -61,13 +63,13 @@ class NaverNewsClient:
                         count = data.get("total", 0)
                         self._cache[cache_key] = count
                         return count
-                    print(f"[Naver] Status {resp.status} for {query}, using Fallback")
+                    print(f"[Naver] Status {resp.status} for {query}")
         except Exception as e:
-            print(f"[Naver] Error: {e}, using Fallback")
+            print(f"[Naver] Error: {e}")
 
-        count = self._get_fallback_count(doctor_name, hospital_name)
-        self._cache[cache_key] = count
-        return count
+        # 키는 설정됐으나 호출 실패 → 가짜값 대신 0 반환 (정직)
+        self._cache[cache_key] = 0
+        return 0
 
     async def get_news_articles(self, doctor_name: str, hospital_name: str, count: int = 10) -> list[dict]:
         """뉴스 기사 목록 조회 (제목, 링크, 날짜)"""
@@ -76,14 +78,15 @@ class NaverNewsClient:
             return self._get_fallback_articles(doctor_name, hospital_name, count)
 
         short = SHORT_NAMES.get(hospital_name, hospital_name)
-        query = f'"{doctor_name}" "{short}"'
+        # 관련도순(sort=sim)으로 의사 관련 기사를 우선 노출
+        query = f'"{doctor_name} 교수" "{short}"'
 
         try:
             ssl_ctx = ssl.create_default_context()
             async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_ctx)) as session:
                 async with session.get(
                     NAVER_SEARCH_URL,
-                    params={"query": query, "display": count, "sort": "date"},
+                    params={"query": query, "display": count, "sort": "sim"},
                     headers=self._headers(),
                     timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
                 ) as resp:
@@ -97,10 +100,11 @@ class NaverNewsClient:
                             }
                             for item in data.get("items", [])
                         ]
-                    print(f"[Naver Articles] Status {resp.status} for {query}, using Fallback")
+                    print(f"[Naver Articles] Status {resp.status} for {query}")
         except Exception as e:
-            print(f"[Naver] Articles error: {e}, using Fallback")
-        return self._get_fallback_articles(doctor_name, hospital_name, count)
+            print(f"[Naver] Articles error: {e}")
+        # 키는 설정됐으나 호출 실패 → 가짜 기사 대신 빈 목록
+        return []
 
     def _get_fallback_count(self, doctor_name: str, hospital_name: str) -> int:
         val = sum(ord(c) for c in doctor_name + hospital_name)
