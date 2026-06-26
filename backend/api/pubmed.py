@@ -25,12 +25,14 @@ OPENALEX_URL = "https://api.openalex.org/works"
 OPENALEX_MAILTO = "hospital-agent@example.com"   # OpenAlex polite pool 식별용
 
 # 병원 영문명 (PubMed affiliation 검색용)
+# 병원명 + 소속 의대/대학명을 함께 넣어 recall을 높인다. 빅5 교수는 병원명 대신
+# 대학명(예: 성균관대·울산대)으로만 색인된 논문이 많아, 대학명을 빼면 h-index가 과소평가됨.
 HOSPITAL_AFFILIATIONS = {
-    "서울대학교병원":   ["Seoul National University Hospital", "SNUH"],
-    "서울아산병원":     ["Asan Medical Center", "AMC Seoul"],
-    "삼성서울병원":     ["Samsung Medical Center", "SMC Seoul"],
+    "서울대학교병원":   ["Seoul National University Hospital", "Seoul National University", "SNUH"],
+    "서울아산병원":     ["Asan Medical Center", "University of Ulsan", "Ulsan College of Medicine"],
+    "삼성서울병원":     ["Samsung Medical Center", "Sungkyunkwan University"],
     "세브란스병원":     ["Severance Hospital", "Yonsei University"],
-    "분당서울대병원":   ["Seoul National University Bundang Hospital", "SNUBH"],
+    "분당서울대병원":   ["Seoul National University Bundang Hospital", "Seoul National University", "SNUBH"],
 }
 
 def _ssl_ctx() -> ssl.SSLContext:
@@ -105,7 +107,7 @@ class PubMedClient:
         params: dict = {
             "db":      "pubmed",
             "term":    query,
-            "retmax":  "200",
+            "retmax":  "500",   # 200은 다작 교수의 논문을 잘라 h-index를 과소평가함
             "retmode": "json",
         }
         if NCBI_API_KEY:
