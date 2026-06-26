@@ -275,7 +275,7 @@ if(doctorsList.length===0){
   return(<div>
     <h2 style={{fontSize:22,fontWeight:800,marginBottom:4}}>검색 결과</h2>
     <p style={{color:'var(--ink3)',fontSize:13,marginBottom:16}}>{pd.disease} · {PU.find(p=>p.id===pd.purpose)?.label}</p>
-    <div className="info-box yellow">😕 검색된 의료진이 없습니다. 백엔드 연결 상태를 확인하거나 잠시 후 다시 시도해주세요.</div>
+    <div className="info-box yellow">😕 해당 조건의 의료진을 찾지 못했습니다. 질환명을 다르게 입력하거나 '진료과 선택' 모드로 다시 시도해주세요.</div>
   </div>);
 }
 const getHospitalHira = (hid) => {

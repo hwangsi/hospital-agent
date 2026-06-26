@@ -71,6 +71,10 @@ KCD_MAP = {
     "자궁근종": {"kcd": "D25", "dept": "산부인과", "surgery_code": "R4121"},
     "난소암": {"kcd": "C56", "dept": "산부인과", "surgery_code": "R4411"},
     "자궁경부암": {"kcd": "C53", "dept": "산부인과", "surgery_code": "R4161"},
+    "자궁암": {"kcd": "C54", "dept": "산부인과", "surgery_code": "R4161"},
+    "자궁내막암": {"kcd": "C54", "dept": "산부인과", "surgery_code": "R4161"},
+    "난관암": {"kcd": "C57", "dept": "산부인과"},
+    "외음부암": {"kcd": "C51", "dept": "산부인과"},
 
     # ─── 유방 / 내분비외과 ───
     # 진료과명은 빅5 병원 실제 분류와 일치하도록 검증(2026-06): 유방암→유방외과,
@@ -116,6 +120,12 @@ SYNONYMS = {
     "prostate cancer": "전립선암",
     "breast cancer": "유방암",
     "lung cancer": "폐암",
+    "자궁체부암": "자궁암",
+    "자궁몸통암": "자궁암",
+    "uterine cancer": "자궁암",
+    "endometrial cancer": "자궁내막암",
+    "cervical cancer": "자궁경부암",
+    "ovarian cancer": "난소암",
     "DLBCL": "미만성 거대B세포 림프종",
     "SLE": "루프스",
     "Behcet": "베체트병",
