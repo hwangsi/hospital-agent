@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from backend.api.hira import HIRAClient
 from backend.api.pubmed import PubMedClient
 from backend.api.openalex import OpenAlexClient
+from backend.api.semantic_scholar import SemanticScholarClient
 from backend.api.naver_news import NaverNewsClient
 from backend.crawlers.base import CrawlerOrchestrator
 from backend.utils.kcd_mapper import KCDMapper
@@ -35,8 +36,10 @@ app.add_middleware(
 # ─── Clients (싱글톤) ────────────────────────────────
 hira_client = HIRAClient()
 pubmed_client = PubMedClient()
-# H-index 1순위 = OpenAlex 저자 엔티티, 실패/레이트리밋 시 PubMed(수정본) 폴백.
-hindex_client = OpenAlexClient(pubmed_fallback=pubmed_client)
+# H-index 체인: OpenAlex(정밀·기관필터) → Semantic Scholar(빠른 단건) → PubMed(최후 폴백).
+# OpenAlex 가 429일 땐 회로차단 후 S2 가 1요청으로 최종 h-index를 빠르게 제공.
+_s2_client = SemanticScholarClient(pubmed_fallback=pubmed_client)
+hindex_client = OpenAlexClient(pubmed_fallback=_s2_client)
 naver_client = NaverNewsClient()
 crawler = CrawlerOrchestrator()
 kcd_mapper = KCDMapper()
@@ -111,13 +114,17 @@ async def search_doctors(req: SearchRequest):
     if req.purpose in ("surgery", "complication") and disease_info.get("surgery_dept"):
         department = disease_info["surgery_dept"]
 
+    # 전문분야 매칭 키워드 — 진료과(외과 등)에 위암/대장/간담췌가 섞여 나오므로
+    # 의료진 '전문분야' 텍스트로 실제 해당 질환 전문의만 걸러낸다.
+    spec_terms = kcd_mapper.specialty_terms(req.disease)
+
     hospital_ids = ["snuh", "amc", "smc", "sev", "snubh"]
 
     # 병렬 실행: 크롤링 + API 동시 호출
     tasks = []
     for hid in hospital_ids:
         tasks.append(
-            _fetch_hospital_data(hid, department, req.disease, kcd_code)
+            _fetch_hospital_data(hid, department, req.disease, kcd_code, spec_terms)
         )
 
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -139,11 +146,32 @@ async def search_doctors(req: SearchRequest):
     }
 
 
+def _filter_doctors_by_specialty(doctors: list[dict], terms: list[str]) -> list[dict]:
+    """
+    의료진 '전문분야' 텍스트가 검색 질환과 맞는 의사만 남긴다.
+    - 전문분야 미상(빈 텍스트) → 판단 보류, 유지 (실제 전문의를 놓치지 않기 위해)
+    - 전문분야는 있으나 질환 키워드가 없으면 제외 (예: 위암 검색 시 대장암 전문 제외)
+    - 매칭이 하나도 없으면(필터 과도/키워드 불일치) 전체 유지 (빈 결과 방지)
+    """
+    if not terms:
+        return doctors
+    kept, any_match = [], False
+    for d in doctors:
+        sp = (d.get("specialties") or "").strip()
+        if not sp:
+            kept.append(d)
+        elif any(t in sp for t in terms):
+            kept.append(d)
+            any_match = True
+    return kept if any_match else doctors
+
+
 async def _fetch_hospital_data(
     hospital_id: str,
     department: str,
     disease: str,
     kcd_code: str,
+    specialty_terms: list[str] | None = None,
 ) -> list[dict]:
     """단일 병원에 대한 모든 데이터를 병렬 수집"""
 
@@ -164,6 +192,9 @@ async def _fetch_hospital_data(
         crawl_data = {"doctors": []}
 
     doctors = crawl_data.get("doctors", [])
+
+    # 전문분야 필터 — 질환과 맞는 전문의만(정확도 ↑). 보강할 의사 수도 줄어 속도 ↑.
+    doctors = _filter_doctors_by_specialty(doctors, specialty_terms or [])
 
     # 4) 각 의사별 H-index + 뉴스 (병렬)
     enriched = []

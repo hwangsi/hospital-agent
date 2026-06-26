@@ -140,6 +140,20 @@ SYNONYMS = {
 class KCDMapper:
     """질환명 → KCD 코드 + 진료과 매핑"""
 
+    def specialty_terms(self, disease_text: str) -> list[str]:
+        """
+        질환 → 의료진 '전문분야' 텍스트 매칭용 키워드.
+        예: '위암' → ['위암'].  진료과(외과 등)는 위암/대장/간담췌가 섞여 있어
+        이 키워드로 실제 해당 암 전문의만 걸러낸다(강성범=대장암 → 위암 검색서 제외).
+        """
+        text = (disease_text or "").strip()
+        info = self.map_disease(text)
+        canonical = info.get("matched") or text
+        terms = {t for t in (canonical, text) if t}
+        # canonical 로 수렴하는 한글 별칭도 포함(영문 별칭은 한글 전문분야와 매칭 안 되나 무해)
+        terms |= {a for a, c in SYNONYMS.items() if c == canonical}
+        return [t for t in terms if len(t) >= 2]
+
     def map_disease(self, disease_text: str) -> dict:
         """
         주관식 질환 입력을 KCD 코드와 진료과로 매핑.

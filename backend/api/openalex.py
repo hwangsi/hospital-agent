@@ -59,9 +59,17 @@ class OpenAlexClient:
     _throttle_lock = asyncio.Lock()
     _last = 0.0
 
+    # 회로차단 — OpenAlex가 연속 실패(429)하면 의사마다 재시도로 느려지므로,
+    # N회 연속 실패 시 일정 시간 OpenAlex를 건너뛰고 바로 폴백한다.
+    _fail_count = 0
+    _cooldown_until = 0.0
+    _COOLDOWN = 600.0          # 10분
+    _FAIL_THRESHOLD = 3
+
     def __init__(self, pubmed_fallback=None):
         self._cache: dict = {}        # (orcid|name_en, hospital) -> 결과
         self._inst_cache: dict = {}   # hospital_name -> [institution id]
+        self._inst_lock = asyncio.Lock()   # 기관해석 중복(동시호출) 방지
         self._pubmed = pubmed_fallback
 
     # ──────────────────────────────────────────────────
@@ -85,6 +93,10 @@ class OpenAlexClient:
         cache_key = f"{orcid or name_en}:{hospital_name}"
         if cache_key in self._cache:
             return self._cache[cache_key]
+
+        # 회로차단 열림 → OpenAlex 건너뛰고 즉시 폴백(레이트리밋 중 지연 방지)
+        if time.monotonic() < OpenAlexClient._cooldown_until:
+            return await self._fallback(doctor_name, hospital_name, name_en)
 
         try:
             if orcid:
@@ -112,11 +124,15 @@ class OpenAlexClient:
                 "oa_author_id": rep.get("id", ""),
                 "source":    "openalex",
             }
+            OpenAlexClient._fail_count = 0          # 성공 → 회로 리셋
             self._cache[cache_key] = result
             return result
 
         except Exception as e:
-            print(f"[OpenAlex] {name_en or doctor_name}/{hospital_name}: {e}")
+            OpenAlexClient._fail_count += 1
+            if OpenAlexClient._fail_count >= OpenAlexClient._FAIL_THRESHOLD:
+                OpenAlexClient._cooldown_until = time.monotonic() + OpenAlexClient._COOLDOWN
+                print(f"[OpenAlex] 회로차단 — {int(OpenAlexClient._COOLDOWN/60)}분간 폴백 (last={e})")
             return await self._fallback(doctor_name, hospital_name, name_en)
 
     async def compute_accurate_h(self, author_ids: list[str]) -> dict:
@@ -181,9 +197,15 @@ class OpenAlexClient:
         return group or [rep]
 
     async def _resolve_institutions(self, hospital_name: str) -> list[str]:
-        """병원 → OpenAlex 기관 ID 목록 (런타임 해석·캐시)."""
+        """병원 → OpenAlex 기관 ID 목록 (런타임 해석·캐시). 동시호출 시 1회만 해석."""
         if hospital_name in self._inst_cache:
             return self._inst_cache[hospital_name]
+        async with self._inst_lock:
+            if hospital_name in self._inst_cache:   # 락 대기 중 채워졌을 수 있음
+                return self._inst_cache[hospital_name]
+            return await self._do_resolve_institutions(hospital_name)
+
+    async def _do_resolve_institutions(self, hospital_name: str) -> list[str]:
         ids: list[str] = []
         for kw in HOSPITAL_INST_KEYWORDS.get(hospital_name, [hospital_name]):
             try:
@@ -195,7 +217,8 @@ class OpenAlexClient:
                         ids.append(oid)
             except Exception as e:
                 print(f"[OpenAlex inst] {kw}: {e}")
-        self._inst_cache[hospital_name] = ids
+        if ids:   # 성공(비어있지 않음)만 캐시 → 429로 실패 시 복구 후 재해석
+            self._inst_cache[hospital_name] = ids
         return ids
 
     async def _throttle(self):
@@ -213,7 +236,8 @@ class OpenAlexClient:
         async with aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=_ssl_ctx())
         ) as session:
-            for attempt in range(3):
+            # 회로차단이 빠르게 열리도록 재시도는 2회로 제한(레이트리밋 중 의사당 지연 최소화)
+            for attempt in range(2):
                 await self._throttle()
                 try:
                     async with session.get(
@@ -223,12 +247,12 @@ class OpenAlexClient:
                             return await resp.json(content_type=None)
                         last = resp.status
                         if resp.status in (429, 500, 502, 503, 504):
-                            await asyncio.sleep(0.8 * (attempt + 1))
+                            await asyncio.sleep(0.5)
                             continue
                         return None   # 그 외 4xx → 재시도 무의미
                 except Exception as e:
                     last = str(e)
-                    await asyncio.sleep(0.8 * (attempt + 1))
+                    await asyncio.sleep(0.5)
         raise RuntimeError(f"openalex failed after retries (last={last})")
 
     async def _fallback(self, doctor_name: str, hospital_name: str, name_en: str) -> dict:
