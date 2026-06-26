@@ -7,9 +7,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ─── 심평원 (HIRA) ─────────────────────────────────
+# ─── 심평원 (HIRA) via 공공데이터포털(data.go.kr) ─────
+# data.go.kr 에서 발급받는 serviceKey (Decoding 키 권장). 미발급 시 placeholder 유지.
 HIRA_API_KEY = os.getenv("HIRA_API_KEY", "YOUR_HIRA_API_KEY")
-HIRA_BASE_URL = "https://opendata.hira.or.kr/op/opc/olapDiagBhvInfo.do"
+
+# data.go.kr 심평원(B551182) Open API 베이스 + 오퍼레이션
+#  - 우수기관병원평가정보서비스(15094089): 평가항목별 "우수기관" 목록 + 등급(실데이터)
+#    → 병원명(yadmNm)으로 매칭하므로 암호화 ykiho 불필요. (라이브 확정 엔드포인트)
+PUBLIC_DATA_BASE       = "https://apis.data.go.kr"
+HIRA_EXCL_ASM_PATH     = "/B551182/exclInstHospAsmInfoService1/getExclInstHospAsmInfo1"
 
 # ─── 네이버 검색 API ────────────────────────────────
 NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID", "YOUR_NAVER_CLIENT_ID")

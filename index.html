@@ -304,7 +304,8 @@ style={{padding:'6px 10px',borderRadius:8,border:`1px solid ${h.accent}40`,backg
 </div>
 {showH&&(()=>{const h=gh(showH),hr=getHospitalHira(showH);if(!hr)return null;return(
 <div className="hira-detail" style={{borderColor:`${h.accent}30`}}>
-<div style={{fontWeight:800,fontSize:14,color:h.color,marginBottom:10}}>{h.name} — {pd.disease}</div>
+<div style={{fontWeight:800,fontSize:14,color:h.color,marginBottom:10,display:'flex',alignItems:'center',gap:8}}>{h.name} — {pd.disease}
+{hr.isEstimate&&<span style={{fontSize:10,fontWeight:700,color:'#92400E',background:'#FEF3C7',border:'1px solid #FDE68A',borderRadius:6,padding:'2px 6px'}}>추정치</span>}</div>
 <div className="three-col" style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:12}}>
 <div className="mini-stat"><div className="lbl">연간 수술</div><div className="val">{hr.annualSurgeries}건</div></div>
 <div className="mini-stat"><div className="lbl">연간 진료</div><div className="val">{hr.annualCases}건</div></div>
@@ -318,6 +319,12 @@ style={{padding:'6px 10px',borderRadius:8,border:`1px solid ${h.accent}40`,backg
 {hr.trend.map(t=><div key={t.year} style={{flex:1,padding:'8px 10px',borderRadius:8,background:'#F8FAFC',textAlign:'center',fontSize:11}}>
 <div style={{color:'var(--ink3)'}}>{t.year}</div><div style={{fontWeight:800,fontSize:15}}>{t.surgeries}</div></div>)}
 </div>
+{hr.grades&&hr.grades.length>0&&(<div style={{marginTop:12}}>
+<div style={{fontSize:11,color:'var(--ink2)',fontWeight:600,marginBottom:6}}>🏅 심평원 적정성평가 우수기관 <span style={{fontWeight:400,color:'var(--ink3)'}}>(실데이터 · {hr.grades.length}개 항목)</span></div>
+<div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+{hr.grades.map((g,i)=><div key={i} style={{padding:'4px 8px',borderRadius:8,background:'#ECFDF5',border:'1px solid #A7F3D0',fontSize:11}}>
+<b style={{color:'var(--ink1)'}}>{g.item}</b>{g.label&&<span style={{color:'#047857',marginLeft:5,fontWeight:700}}>{g.label}</span>}</div>)}
+</div></div>)}
 <div style={{fontSize:10,color:'var(--ink3)',marginTop:8}}>출처: {hr.source} ({hr.dataYear})</div>
 </div>);})()}
 </div>

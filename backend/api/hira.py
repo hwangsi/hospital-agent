@@ -1,44 +1,82 @@
 """
-심평원(HIRA) 공개데이터 API 클라이언트
-- 병원별 수술건수, 사망률, 합병증률 등 조회
-- API: https://opendata.hira.or.kr
+심평원(HIRA) 데이터 클라이언트 — 하이브리드 소스
 
-실제 API 엔드포인트:
-  1) 질병·행위별 의료기관 통계: /op/opc/olapDiagBhvInfo.do
-  2) 의료질평가 결과: /op/opc/olapHospQltyEvalInfo.do
-  3) 수술통계: /op/opc/olapMdclRtInfo.do
+설계 (HANDOFF 4번 결정사항: "하이브리드"):
+  · 수술건수/사망률/재원일수 등 정량 지표  →  로컬 CSV (data/hira_stats.csv)
+        병원별 × 질환별 수술건수·사망률은 공개 REST API로 사실상 제공되지 않으므로,
+        HIRA 공개통계/적정성평가 보고서에서 추출한 수치를 CSV로 적재한다.
+  · 적정성평가 "등급"(평가항목별 우수기관)  →  data.go.kr 실 API
+        우수기관병원평가정보서비스(B551182/exclInstHospAsmInfoService1/getExclInstHospAsmInfo1)에서
+        평가항목별 우수기관 목록을 받아 병원명(yadmNm)으로 매칭한다(암호화 ykiho 불필요).
+
+CSV 행이 없으면 정량 지표는 "추정치(isEstimate=True)"로 명확히 표기한다(가짜를 실데이터로
+위장하지 않는다). API 키(data.go.kr serviceKey)가 없으면 등급(grades)은 빈 배열을 반환한다.
+
+폐기됨: opendata.hira.or.kr 의 olap*.do 경로는 REST API가 아니라 Any-ID SSO 로그인
+웹페이지를 반환하므로(키가 있어도 동작 안 함) 전부 제거되었다.
 """
-import asyncio
+import os
+import csv
 import ssl
-import aiohttp
+import asyncio
 from typing import Optional
 from datetime import datetime
 
-import sys, os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from config.settings import HIRA_API_KEY, REQUEST_TIMEOUT
+import aiohttp
 
-# 병원별 요양기관번호 (심평원 등록 코드)
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+from config.settings import (
+    HIRA_API_KEY,
+    REQUEST_TIMEOUT,
+    PUBLIC_DATA_BASE,
+    HIRA_EXCL_ASM_PATH,
+)
+
+# 병원별 요양기관번호(평문) — 참고용/병원 식별용. 우수기관 등급은 yadmNm 매칭이라 미사용.
 HOSPITAL_CODES = {
-    "snuh":  "11100338",  # 서울대학교병원
-    "amc":   "11100575",  # 서울아산병원
-    "smc":   "11100530",  # 삼성서울병원
-    "sev":   "11100321",  # 세브란스병원 (연세의료원)
-    "snubh": "31101366",  # 분당서울대병원
+    "snuh":  "11100338",
+    "amc":   "11100575",
+    "smc":   "11100530",
+    "sev":   "11100321",
+    "snubh": "31101366",
 }
 
-# 공공데이터포털 심평원 서비스
-PUBLIC_DATA_BASE     = "https://apis.data.go.kr"
-DIAG_STAT_SERVICE    = "/B551182/DiagBhvInfoService/getDiagBhvInfo"
-QUALITY_SERVICE      = "/B551182/MdlQltyEvalInfoService/getEvalInfo"
+# 우수기관 목록의 병원명(yadmNm) — 빅5의 "정식 등록명"(정규화) 정확일치용.
+# 부분일치는 동명 분원(강남/용인/원주 세브란스, 분당서울대, 강릉아산 등)을 잘못 흡수하므로 금지.
+# 값은 라이브 응답(getExclInstHospAsmInfo1)에서 확인한 실제 yadmNm 의 정규화형이다.
+HOSPITAL_YADM = {
+    "snuh":  {"서울대학교병원"},
+    "amc":   {"재단법인아산사회복지재단서울아산병원", "서울아산병원"},
+    "smc":   {"삼성서울병원"},
+    "sev":   {"연세대학교의과대학세브란스병원"},          # 신촌 본원만 (강남/용인 제외)
+    "snubh": {"분당서울대학교병원"},
+}
+
+
+def _norm(s: str) -> str:
+    return (s or "").replace(" ", "").replace("(", "").replace(")", "")
+
+CSV_COLUMNS = (
+    "hospital_id,kcd_code,annualSurgeries,annualCases,mortalityRate,"
+    "complicationRate,readmissionRate,avgLOS,surgeries_2023,surgeries_2024,"
+    "surgeries_2025,dataYear,source"
+)
+
+
+def _key_ready() -> bool:
+    return bool(HIRA_API_KEY) and "YOUR_HIRA" not in HIRA_API_KEY
 
 
 class HIRAClient:
-    """심평원 공개데이터 API"""
+    """심평원 데이터 — CSV(정량) + data.go.kr 적정성평가 등급(API) 하이브리드."""
 
     def __init__(self):
-        self._cache: dict = {}
-        self._cache_ts: dict = {}
+        self._cache: dict = {}          # surgery_stats 결과 캐시
+        self._grade_cache: dict = {}    # '__index__' -> {yadmNm: [grades]}
+        self._index_lock = asyncio.Lock()   # 우수기관 목록 1회만 적재
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self._csv_path = os.path.join(base_dir, "data", "hira_stats.csv")
 
     # ──────────────────────────────────────────────────
     # Public API
@@ -51,386 +89,231 @@ class HIRAClient:
         year: Optional[str] = None,
     ) -> dict:
         """
-        병원별 질환(KCD) 수술 통계 조회.
+        병원별 질환(KCD) 통계 반환.
 
-        우선순위:
-          1) 로컬 CSV 파일 (data/hira_stats.csv)
-          2) 심평원 opendata.hira.or.kr — olapDiagBhvInfo
-          3) 공공데이터포털 data.go.kr  — DiagBhvInfoService
-          4) API 키 미설정/실패 시 deterministic LCG 모의 Fallback DB
+        반환 구조 = (CSV 또는 추정) 정량지표  ⊕  (API) 적정성평가 등급(grades).
         """
         cache_key = f"{hospital_id}:{kcd_code}:{year or 'latest'}"
         if cache_key in self._cache:
             return self._cache[cache_key]
 
+        if hospital_id not in HOSPITAL_CODES:
+            return {"error": f"Unknown hospital: {hospital_id}"}
+
         if not year:
             year = str(datetime.now().year - 1)
 
-        ykiho = HOSPITAL_CODES.get(hospital_id, "")
-        if not ykiho:
-            return {"error": f"Unknown hospital: {hospital_id}"}
+        # 1) 정량 지표 — CSV 우선, 없으면 추정치(명확히 표기)
+        stats = self._load_from_csv(hospital_id, kcd_code)
+        if stats is None:
+            stats = self._estimate_stats(hospital_id, kcd_code)
 
-        # ─── 1. 로컬 CSV 파일 우선 파싱 ───
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        csv_path = os.path.join(base_dir, "data", "hira_stats.csv")
-        if os.path.exists(csv_path):
-            try:
-                import csv
-                with open(csv_path, mode='r', encoding='utf-8-sig') as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        if row.get("hospital_id") == hospital_id and row.get("kcd_code") == kcd_code:
-                            result = {
-                                "annualSurgeries": int(row.get("annualSurgeries", 0)),
-                                "annualCases": int(row.get("annualCases", 0)),
-                                "mortalityRate": float(row.get("mortalityRate", 0.0)),
-                                "complicationRate": float(row.get("complicationRate", 0.0)),
-                                "readmissionRate": float(row.get("readmissionRate", 0.0)),
-                                "avgLOS": int(row.get("avgLOS", 0)),
-                                "trend": [
-                                    {"year": 2023, "surgeries": int(row.get("surgeries_2023", 0))},
-                                    {"year": 2024, "surgeries": int(row.get("surgeries_2024", 0))},
-                                    {"year": 2025, "surgeries": int(row.get("surgeries_2025", 0))},
-                                ],
-                                "dataYear": row.get("dataYear", "2025"),
-                                "source": row.get("source", "로컬 CSV 데이터베이스 (hira_stats.csv)")
-                            }
-                            self._cache[cache_key] = result
-                            return result
-            except Exception as csv_err:
-                print(f"[HIRA CSV] Error reading CSV: {csv_err}")
+        # 2) 적정성평가 등급 — data.go.kr 실 API (키 있을 때만)
+        stats["grades"] = await self._get_grades(hospital_id)
 
-        # ─── 2. API 키 미설정 / 플레이스홀더 상태 시 LCG Fallback 즉시 실행 ───
-        if not HIRA_API_KEY or "YOUR_HIRA" in HIRA_API_KEY:
-            result = self._get_fallback_hira_stats(hospital_id, kcd_code, year)
-            self._cache[cache_key] = result
-            return result
-
-        result = None
-        # 1차: 심평원 opendata
-        result = await self._fetch_hira_opendata(ykiho, kcd_code, year)
-
-        # 2차: 공공데이터포털 fallback
-        if not result or result.get("annualSurgeries", 0) == 0:
-            result = await self._fetch_public_data(ykiho, kcd_code, year)
-
-        # 3차: 의료질평가 데이터로 사망률/합병증률 보완
-        if result and result.get("mortalityRate", 0) == 0:
-            quality = await self._fetch_quality_data(ykiho, year)
-            if quality:
-                result["mortalityRate"]    = quality.get("mortalityRate", 0)
-                result["complicationRate"] = quality.get("complicationRate", 0)
-                result["readmissionRate"]  = quality.get("readmissionRate", 0)
-                if quality.get("avgLOS"):
-                     result["avgLOS"] = quality["avgLOS"]
-
-        # trend(3년 추이) 채우기
-        if result and not result.get("trend"):
-            result["trend"] = await self._fetch_trend(ykiho, kcd_code, year)
-
-        final = result or self._get_fallback_hira_stats(hospital_id, kcd_code, year)
-        self._cache[cache_key] = final
-        return final
-
-    def _get_fallback_hira_stats(self, hospital_id: str, kcd_code: str, year: str) -> dict:
-        """프론트엔드 LCG와 완벽히 동기화된 정밀 모의 HIRA 지표 생성"""
-        s = sum(ord(c) for c in (hospital_id + kcd_code))
-        
-        def r(n: int) -> float:
-            return ((s * 9301 + 49297 + n * 173) % 233280) / 233280.0
-            
-        factors = {"snuh": 1.1, "amc": 1.25, "smc": 1.05, "sev": 0.95, "snubh": 0.8}
-        f = factors.get(hospital_id, 1.0)
-        
-        as_ = int(80 + r(1) * 600 * f)
-        annual_cases = int(as_ * (1.5 + r(2) * 2))
-        mortality_rate = round(max(0.1, 2.5 - r(3) * 2.2), 1)
-        complication_rate = round(max(1.0, 8.0 - r(4) * 6.0), 1)
-        readmission_rate = round(max(1.0, 10.0 - r(5) * 7.0), 1)
-        avg_los = int(4 + r(6) * 12)
-        
-        trend = []
-        for i in range(3):
-            trend_year = 2023 + i
-            trend.append({
-                "year": trend_year,
-                "surgeries": int(as_ * (0.85 + r(10 + i) * 0.3))
-            })
-            
-        return {
-            "annualSurgeries": as_,
-            "annualCases": annual_cases,
-            "mortalityRate": mortality_rate,
-            "complicationRate": complication_rate,
-            "readmissionRate": readmission_rate,
-            "avgLOS": avg_los,
-            "trend": trend,
-            "dataYear": "2025",
-            "source": "심평원 + 건보공단 (Academic Simulation DB)",
-        }
-
-
-    # ──────────────────────────────────────────────────
-    # 심평원 opendata.hira.or.kr
-    # ──────────────────────────────────────────────────
-
-    async def _fetch_hira_opendata(self, ykiho: str, kcd_code: str, year: str) -> Optional[dict]:
-        """심평원 OLAP 통계 API"""
-        try:
-            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl.create_default_context())) as session:
-                async with session.get(
-                    "https://opendata.hira.or.kr/op/opc/olapDiagBhvInfo.do",
-                    params={
-                        "serviceKey": HIRA_API_KEY,
-                        "ykiho":      ykiho,
-                        "diagCd":     kcd_code,
-                        "inptOutptClCd": "I",
-                        "type":       "json",
-                        "numOfRows":  "100",
-                        "pageNo":     "1",
-                    },
-                    timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
-                ) as resp:
-                    if resp.status == 200:
-                        return self._parse_olap_response(await resp.json(content_type=None), year)
-        except Exception as e:
-            print(f"[HIRA-opendata] ykiho={ykiho} kcd={kcd_code}: {e}")
-        return None
-
-    def _parse_olap_response(self, data: dict, year: str) -> Optional[dict]:
-        """olapDiagBhvInfo 응답 파싱"""
-        try:
-            header = data.get("response", {}).get("header", {})
-            result_code = str(header.get("resultCode", ""))
-            if result_code not in ("00", "0000", ""):
-                print(f"[HIRA] API 오류: {header.get('resultMsg', '')}")
-                return None
-
-            body = data.get("response", {}).get("body", {})
-            items = body.get("items", {})
-            if not items:
-                return None
-
-            item_list = items.get("item", [])
-            if isinstance(item_list, dict):
-                item_list = [item_list]
-            if not item_list:
-                return None
-
-            # recCnt: 청구건수(수술), ptntCnt: 환자수, ddCnt: 재원일수 합계
-            total_surgeries = sum(int(i.get("recCnt",  0) or 0) for i in item_list)
-            total_cases     = sum(int(i.get("ptntCnt", 0) or 0) for i in item_list)
-            total_los_days  = sum(int(i.get("ddCnt",   0) or 0) for i in item_list)
-            avg_los = round(total_los_days / total_cases, 1) if total_cases else 0
-
-            return {
-                "annualSurgeries": total_surgeries,
-                "annualCases":     total_cases,
-                "mortalityRate":   0.0,   # 의료질평가 API에서 별도 조회
-                "complicationRate": 0.0,
-                "readmissionRate": 0.0,
-                "avgLOS":          avg_los,
-                "trend":           [],
-                "dataYear":        year,
-                "source":          "심평원 공개데이터 (olapDiagBhvInfo)",
-            }
-        except Exception as e:
-            print(f"[HIRA] parse error: {e}")
-            return None
-
-    # ──────────────────────────────────────────────────
-    # 공공데이터포털 fallback
-    # ──────────────────────────────────────────────────
-
-    async def _fetch_public_data(self, ykiho: str, kcd_code: str, year: str) -> Optional[dict]:
-        """data.go.kr 심평원 진단·행위 통계 서비스"""
-        try:
-            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl.create_default_context())) as session:
-                async with session.get(
-                    PUBLIC_DATA_BASE + DIAG_STAT_SERVICE,
-                    params={
-                        "serviceKey": HIRA_API_KEY,
-                        "ykiho":     ykiho,
-                        "diagCd":    kcd_code,
-                        "type":      "json",
-                        "numOfRows": "100",
-                        "pageNo":    "1",
-                    },
-                    timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
-                ) as resp:
-                    if resp.status == 200:
-                        return self._parse_olap_response(await resp.json(content_type=None), year)
-        except Exception as e:
-            print(f"[HIRA-public] fallback error: {e}")
-        return None
-
-    # ──────────────────────────────────────────────────
-    # 의료질평가 (사망률 / 합병증률 / 재입원률)
-    # ──────────────────────────────────────────────────
-
-    async def _fetch_quality_data(self, ykiho: str, year: str) -> Optional[dict]:
-        """심평원 의료질평가 종합정보 조회"""
-        result = await self._fetch_quality_hira(ykiho)
-        if not result:
-            result = await self._fetch_quality_public(ykiho)
-        return result
-
-    async def _fetch_quality_hira(self, ykiho: str) -> Optional[dict]:
-        try:
-            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl.create_default_context())) as session:
-                async with session.get(
-                    "https://opendata.hira.or.kr/op/opc/olapHospQltyEvalInfo.do",
-                    params={
-                        "serviceKey": HIRA_API_KEY,
-                        "ykiho":     ykiho,
-                        "type":      "json",
-                        "numOfRows": "50",
-                    },
-                    timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
-                ) as resp:
-                    if resp.status == 200:
-                        return self._parse_quality_response(await resp.json(content_type=None))
-        except Exception as e:
-            print(f"[HIRA-quality] ykiho={ykiho}: {e}")
-        return None
-
-    async def _fetch_quality_public(self, ykiho: str) -> Optional[dict]:
-        try:
-            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl.create_default_context())) as session:
-                async with session.get(
-                    PUBLIC_DATA_BASE + QUALITY_SERVICE,
-                    params={
-                        "serviceKey": HIRA_API_KEY,
-                        "ykiho":     ykiho,
-                        "type":      "json",
-                        "numOfRows": "50",
-                    },
-                    timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
-                ) as resp:
-                    if resp.status == 200:
-                        return self._parse_quality_response(await resp.json(content_type=None))
-        except Exception as e:
-            print(f"[HIRA-quality-public] ykiho={ykiho}: {e}")
-        return None
-
-    def _parse_quality_response(self, data: dict) -> Optional[dict]:
-        """
-        의료질평가 응답 파싱.
-
-        주요 지표 코드:
-          INDCD_01 / "사망" : 수술사망률 (%)
-          INDCD_02 / "합병" : 합병증발생률 (%)
-          INDCD_03 / "재입원": 재입원율 (%)
-          INDCD_04 / "재원" : 평균재원일수 (일)
-        """
-        try:
-            body = data.get("response", {}).get("body", {})
-            items = body.get("items", {})
-            if not items:
-                return None
-
-            item_list = items.get("item", [])
-            if isinstance(item_list, dict):
-                item_list = [item_list]
-            if not item_list:
-                return None
-
-            result = {
-                "mortalityRate":    0.0,
-                "complicationRate": 0.0,
-                "readmissionRate":  0.0,
-                "avgLOS":           0,
-            }
-
-            for item in item_list:
-                ind_cd  = str(item.get("indCd", "") or item.get("evalIndCd", "") or "")
-                ind_nm  = str(item.get("indNm", "") or item.get("evalIndNm", "") or "")
-                val_str = str(item.get("indVal", "") or item.get("evalVal", "") or "0")
-                try:
-                    val = float(val_str.replace(",", "").replace("%", "").strip())
-                except ValueError:
-                    continue
-
-                key = (ind_cd + ind_nm).lower()
-                if "01" in ind_cd or "사망" in key or "death" in key:
-                    result["mortalityRate"] = round(val, 1)
-                elif "02" in ind_cd or "합병" in key or "complication" in key:
-                    result["complicationRate"] = round(val, 1)
-                elif "03" in ind_cd or "재입원" in key or "readmit" in key:
-                    result["readmissionRate"] = round(val, 1)
-                elif "04" in ind_cd or "재원" in key or "los" in key:
-                    result["avgLOS"] = int(val)
-
-            return result
-        except Exception as e:
-            print(f"[HIRA] quality parse error: {e}")
-            return None
-
-    # ──────────────────────────────────────────────────
-    # 3년 추이 (trend)
-    # ──────────────────────────────────────────────────
-
-    async def _fetch_trend(self, ykiho: str, kcd_code: str, base_year: str) -> list:
-        """최근 3개 연도 수술건수 추이 병렬 조회"""
-        base  = int(base_year)
-        years = [str(base - 2), str(base - 1), str(base)]
-
-        tasks  = [self._fetch_year_surgeries(ykiho, kcd_code, y) for y in years]
-        counts = await asyncio.gather(*tasks, return_exceptions=True)
-
-        return [
-            {"year": int(y), "surgeries": (0 if isinstance(c, Exception) or c is None else c)}
-            for y, c in zip(years, counts)
-        ]
-
-    async def _fetch_year_surgeries(self, ykiho: str, kcd_code: str, year: str) -> int:
-        """특정 연도의 수술건수 단건 조회"""
-        try:
-            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl.create_default_context())) as session:
-                async with session.get(
-                    "https://opendata.hira.or.kr/op/opc/olapDiagBhvInfo.do",
-                    params={
-                        "serviceKey": HIRA_API_KEY,
-                        "ykiho":     ykiho,
-                        "diagCd":    kcd_code,
-                        "inptOutptClCd": "I",
-                        "yadmYr":    year,
-                        "type":      "json",
-                        "numOfRows": "100",
-                    },
-                    timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
-                ) as resp:
-                    if resp.status == 200:
-                        parsed = self._parse_olap_response(await resp.json(content_type=None), year)
-                        if parsed:
-                            return parsed["annualSurgeries"]
-        except Exception:
-            pass
-        return 0
-
-    # ──────────────────────────────────────────────────
-    # 외부 직접 호출용
-    # ──────────────────────────────────────────────────
+        self._cache[cache_key] = stats
+        return stats
 
     async def get_quality_evaluation(self, hospital_id: str) -> dict:
-        """심평원 의료질평가 결과 단건 조회"""
-        ykiho = HOSPITAL_CODES.get(hospital_id, "")
-        if not ykiho:
+        """병원 적정성평가 등급만 단건 조회(외부 직접 호출용)."""
+        if hospital_id not in HOSPITAL_CODES:
             return {}
-        result = await self._fetch_quality_data(ykiho, str(datetime.now().year - 1))
-        return result or {}
+        return {"grades": await self._get_grades(hospital_id)}
 
     # ──────────────────────────────────────────────────
+    # 1. CSV (정량 지표)
+    # ──────────────────────────────────────────────────
 
-    def _empty_result(self, year: str) -> dict:
+    def _load_from_csv(self, hospital_id: str, kcd_code: str) -> Optional[dict]:
+        if not os.path.exists(self._csv_path):
+            return None
+        try:
+            with open(self._csv_path, mode="r", encoding="utf-8-sig") as f:
+                for row in csv.DictReader(f):
+                    if row.get("hospital_id") == hospital_id and row.get("kcd_code") == kcd_code:
+                        return self._row_to_stats(row)
+        except Exception as e:
+            print(f"[HIRA CSV] read error: {e}")
+        return None
+
+    @staticmethod
+    def _row_to_stats(row: dict) -> dict:
+        def _i(k):
+            try:
+                return int(float(row.get(k, 0) or 0))
+            except (ValueError, TypeError):
+                return 0
+
+        def _f(k):
+            try:
+                return round(float(row.get(k, 0) or 0), 1)
+            except (ValueError, TypeError):
+                return 0.0
+
         return {
-            "annualSurgeries":  0,
-            "annualCases":      0,
-            "mortalityRate":    0,
-            "complicationRate": 0,
-            "readmissionRate":  0,
-            "avgLOS":           0,
-            "trend":            [],
-            "dataYear":         year,
-            "source":           "데이터 조회 실패 — API 키 확인 필요",
+            "annualSurgeries":  _i("annualSurgeries"),
+            "annualCases":      _i("annualCases"),
+            "mortalityRate":    _f("mortalityRate"),
+            "complicationRate": _f("complicationRate"),
+            "readmissionRate":  _f("readmissionRate"),
+            "avgLOS":           _i("avgLOS"),
+            "trend": [
+                {"year": 2023, "surgeries": _i("surgeries_2023")},
+                {"year": 2024, "surgeries": _i("surgeries_2024")},
+                {"year": 2025, "surgeries": _i("surgeries_2025")},
+            ],
+            "dataYear":   str(row.get("dataYear", "2025")),
+            "isEstimate": False,
+            "source":     row.get("source") or "HIRA 공개통계 (data/hira_stats.csv)",
+        }
+
+    # ──────────────────────────────────────────────────
+    # 2. 적정성평가 등급 — data.go.kr 우수기관병원평가정보서비스
+    #    평가항목별 "우수기관" 목록을 1회 적재(전 병원 공용)하고 병원명으로 필터.
+    # ──────────────────────────────────────────────────
+
+    async def _get_grades(self, hospital_id: str) -> list:
+        """빅5 병원이 '우수기관'으로 등재된 평가항목·등급 목록. 키 없으면 빈 배열."""
+        if not _key_ready():
+            return []
+        index = await self._load_excellent_index()
+        canon = {_norm(a) for a in HOSPITAL_YADM.get(hospital_id, set())}
+        grades = []
+        for nm, rows in index.items():
+            if nm in canon:   # 정확일치(분원 오매칭 방지)
+                grades.extend(rows)
+        # (평가항목, 유형) 중복 제거
+        seen, uniq = set(), []
+        for g in grades:
+            k = (g["item"], g["label"])
+            if k not in seen:
+                seen.add(k)
+                uniq.append(g)
+        return uniq
+
+    async def _load_excellent_index(self) -> dict:
+        """
+        우수기관 목록 전체를 페이지네이션으로 적재 → {정규화 yadmNm: [{item,label,grade}]}.
+        병원 무관 단일 캐시(_grade_cache['__index__']). 총 ~6600건, 락으로 1회만 적재.
+        """
+        if "__index__" in self._grade_cache:
+            return self._grade_cache["__index__"]
+
+        async with self._index_lock:
+            # 락 획득 사이에 다른 코루틴이 이미 적재했을 수 있음
+            if "__index__" in self._grade_cache:
+                return self._grade_cache["__index__"]
+            return await self._do_load_excellent_index()
+
+    async def _do_load_excellent_index(self) -> dict:
+        index: dict = {}
+        ok = False
+        try:
+            page = 1
+            while page <= 20:   # 안전 상한 (우수기관 목록은 수천 건 이하)
+                params = {
+                    "serviceKey": HIRA_API_KEY,
+                    "pageNo": str(page),
+                    "numOfRows": "500",
+                    "_type": "json",
+                }
+                data = await self._get_json(PUBLIC_DATA_BASE + HIRA_EXCL_ASM_PATH, params)
+                items = self._items(data)
+                if not items:
+                    break
+                for it in items:
+                    nm = _norm(str(it.get("yadmNm", "")))
+                    if not nm:
+                        continue
+                    # 실응답: asmNm=평가항목, asmGrd=유형코드(int), asmGrdNm=유형명("최근우수"/"N회연속")
+                    item_nm = str(it.get("asmNm") or it.get("asmItemNm") or it.get("itemNm") or "").strip()
+                    label   = str(it.get("asmGrdNm") or it.get("grdNm") or "").strip()
+                    grade   = str(it.get("asmGrd") or it.get("grade") or "").strip()
+                    if item_nm:
+                        index.setdefault(nm, []).append({
+                            "item": item_nm,
+                            "label": label or "우수기관",
+                            "grade": grade,
+                        })
+                if len(items) < 500:
+                    ok = True
+                    break
+                page += 1
+            else:
+                ok = True   # 페이지 상한 도달도 정상 종료로 간주
+        except Exception as e:
+            print(f"[HIRA excellent] load error: {e}")
+
+        # 완전 성공 + 비어있지 않을 때만 캐시(일시 실패는 다음 요청에서 재시도)
+        if ok and index:
+            self._grade_cache["__index__"] = index
+        return index
+
+    # ──────────────────────────────────────────────────
+    # HTTP / 파싱 헬퍼
+    # ──────────────────────────────────────────────────
+
+    @staticmethod
+    async def _get_json(url: str, params: dict) -> dict:
+        connector = aiohttp.TCPConnector(ssl=ssl.create_default_context())
+        async with aiohttp.ClientSession(connector=connector) as session:
+            async with session.get(
+                url, params=params,
+                timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
+            ) as resp:
+                if resp.status != 200:
+                    raise RuntimeError(f"HTTP {resp.status}")
+                return await resp.json(content_type=None)
+
+    @staticmethod
+    def _items(data: dict) -> list:
+        """data.go.kr 표준 응답 → item 리스트. 오류헤더면 빈 리스트."""
+        if not isinstance(data, dict):
+            return []
+        resp = data.get("response", {})
+        header = resp.get("header", {})
+        code = str(header.get("resultCode", "")) if header else ""
+        if code and code not in ("00", "0000"):
+            print(f"[HIRA] API result: {header.get('resultMsg', code)}")
+            return []
+        items = (resp.get("body", {}) or {}).get("items", {})
+        if not items:
+            return []
+        item = items.get("item", []) if isinstance(items, dict) else items
+        if isinstance(item, dict):
+            return [item]
+        return item or []
+
+    # ──────────────────────────────────────────────────
+    # 3. CSV 미적재 시 추정치 (명확히 isEstimate=True)
+    # ──────────────────────────────────────────────────
+
+    def _estimate_stats(self, hospital_id: str, kcd_code: str) -> dict:
+        """
+        CSV에 해당 행이 없을 때만 사용하는 결정론적 추정치.
+        실데이터가 아님을 isEstimate=True 와 source 문구로 명확히 표기한다.
+        """
+        s = sum(ord(c) for c in (hospital_id + kcd_code))
+
+        def r(n: int) -> float:
+            return ((s * 9301 + 49297 + n * 173) % 233280) / 233280.0
+
+        factors = {"snuh": 1.1, "amc": 1.25, "smc": 1.05, "sev": 0.95, "snubh": 0.8}
+        f = factors.get(hospital_id, 1.0)
+
+        as_ = int(80 + r(1) * 600 * f)
+        return {
+            "annualSurgeries":  as_,
+            "annualCases":      int(as_ * (1.5 + r(2) * 2)),
+            "mortalityRate":    round(max(0.1, 2.5 - r(3) * 2.2), 1),
+            "complicationRate": round(max(1.0, 8.0 - r(4) * 6.0), 1),
+            "readmissionRate":  round(max(1.0, 10.0 - r(5) * 7.0), 1),
+            "avgLOS":           int(4 + r(6) * 12),
+            "trend": [
+                {"year": 2023 + i, "surgeries": int(as_ * (0.85 + r(10 + i) * 0.3))}
+                for i in range(3)
+            ],
+            "dataYear":   "2025",
+            "isEstimate": True,
+            "source":     "추정치 (공개통계 미적재 — data/hira_stats.csv 채우면 실데이터로 대체)",
         }

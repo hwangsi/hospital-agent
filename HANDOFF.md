@@ -48,9 +48,32 @@ socketserver.TCPServer(("127.0.0.1",8080), H).serve_forever()
 `.env` (gitignore됨): NAVER_CLIENT_ID/SECRET = 실제, HIRA_API_KEY = placeholder,
 NCBI_API_KEY = 빈값(선택사항이지만 넣으면 esearch 3→10req/s로 빨라짐).
 
-## 4. ⏭ 다음 작업: 심평원(HIRA) 수술실적 실데이터화 (미완료)
-UI의 "심평원·건보공단 병원별 수술실적" 스트립(수술건수/사망률/합병증률)은 현재 **가짜**.
-HIRA 클라이언트: `backend/api/hira.py`.
+## 4. 심평원(HIRA) 수술실적 — 하이브리드 구조로 재작성 완료 (키 대기 중)
+**결정: 하이브리드** — 수술건수/사망률 등 정량지표는 **CSV**, 적정성평가 "등급"은 **data.go.kr 실 API**.
+(병원별×질환별 수술건수/사망률은 공개 REST API로 제공 안 됨이 재확인됨 → 정량은 CSV가 유일한 실데이터 경로.)
+
+### 이번 세션에 한 것 (코드 완료, 검증됨)
+- `backend/api/hira.py` **전면 재작성**: 죽은 `opendata.hira.or.kr` olap 경로 전부 제거.
+  - CSV 1순위(`data/hira_stats.csv`) → 행 있으면 `isEstimate=False` 실데이터, 없으면 `isEstimate=True` 추정치(명확 표기).
+  - 적정성평가 등급: **우수기관병원평가정보서비스** `data.go.kr B551182/exclInstHospAsmInfoService1/getExclInstHospAsmInfo1` ✅ **라이브 작동 확인**. 평가항목별 우수기관 전체목록(~6600건)을 락으로 1회 적재·캐시 후 빅5 **yadmNm 정확일치** 매칭(ykiho 불필요). 실응답 필드: `asmNm`(항목) `asmGrd`(유형코드) `asmGrdNm`(라벨 "3회연속"/"최근우수") `yadmNm`. 키 미활성 시 grades=[] (정직).
+  - 매칭 정확일치 필수: 부분일치는 분원 오매칭(강남/용인 세브란스, 강릉아산, 분당서울대)을 흡수함. 등록 정식명 `HOSPITAL_YADM` 사용. amc=`재단법인아산사회복지재단서울아산병원`, sev=신촌 본원만.
+  - 라이브 결과: snuh 7 / amc 9 / smc 9 / sev 9 / snubh 6 항목.
+- `config/settings.py`: `PUBLIC_DATA_BASE` + `HIRA_EXCL_ASM_PATH` 추가, 죽은 `HIRA_BASE_URL` 제거.
+- **실 키 활성**: `.env` HIRA_API_KEY = `a467…ce4e6` (Decoding) — 401이었다가 활성화됨, 라이브 200 확인.
+- ⚠️ stale `.pyc` 주의: 이전 세션 버전이 하드코딩 가짜 등급을 남겨 `__pycache__`에 잔존했었음 → 제거함. 의심되면 `find backend -name __pycache__ -exec rm -rf {} +`.
+- `data/` 폴더 생성: 헤더만 있는 `hira_stats.csv` 템플릿 + `data/README.md`(컬럼정의·출처·채우는 법).
+- `index.html`: 추정치 **"추정치" 배지** + **적정성평가 등급 블록**(grades 있을 때만 표시) 추가.
+- `.env.example`: HIRA 키 발급처를 data.go.kr 15094093/15001698 로 갱신.
+- 검증: CSV행→실데이터, 행없음→추정, 키없음→grades[], uvicorn 부팅+HTTP 응답 OK.
+
+### ⏭ 남은 작업
+1. ~~키 401 해소~~ ✅ 완료(라이브 작동). ~~grades 필드명 검증~~ ✅ 완료(asmNm/asmGrdNm).
+2. **`data/hira_stats.csv` 실수치 적재** (유일 남은 미완): 빅5 × 주요질환(C16/C18/C34/C50/C22/C61/C53/C73 등) 수술건수/사망률.
+   현재 정량지표(수술건수/사망률/재원)는 CSV 비어있어 **추정치(isEstimate=true, UI에 "추정치" 배지)** 로 표시됨.
+   출처는 HIRA 적정성평가 보고서·병원 연보(`data/README.md` 참고). 출처·기준연도 `source` 컬럼에 명시.
+   - 참고: 우수기관 등급(API)은 실데이터지만 **정량 수술건수는 공개 API에 없음** → CSV가 유일 경로.
+
+(이하 과거 조사기록 — 참고용)
 
 ### 조사로 확인된 사실 (재조사 불필요)
 - 코드의 `opendata.hira.or.kr/op/opc/olapDiagBhvInfo.do` 등은 **REST API가 아니라 로그인(Any-ID SSO) 웹페이지**를 반환함 → 키가 있어도 안 됨. **이 경로는 폐기 대상.**
