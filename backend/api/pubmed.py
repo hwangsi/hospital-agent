@@ -7,6 +7,7 @@ PubMed E-utilities API — 의사별 H-index 산출
 import asyncio
 import json
 import ssl
+import time
 from typing import Optional
 from urllib.parse import urlencode
 
@@ -20,9 +21,10 @@ from backend.utils.name_converter import (
     english_name_to_pubmed_variants,
 )
 
-ESEARCH_URL  = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-OPENALEX_URL = "https://api.openalex.org/works"
-OPENALEX_MAILTO = "hospital-agent@example.com"   # OpenAlex polite pool 식별용
+ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+# NIH iCite — PMID별 인용수(citation_count). 무료·무제한(정부 서비스).
+# OpenAlex는 예산(budget) 한도로 대량 조회 시 429를 반환해 부적합.
+ICITE_URL = "https://icite.od.nih.gov/api/pubs"
 
 # 병원 영문명 (PubMed affiliation 검색용)
 # 병원명 + 소속 의대/대학명을 함께 넣어 recall을 높인다. 빅5 교수는 병원명 대신
@@ -49,8 +51,22 @@ def _is_initials_variant(v: str) -> bool:
 class PubMedClient:
     """PubMed E-utilities + NIH iCite 기반 H-index 산출"""
 
+    # NCBI esearch 전역 rate limit — 무키 3req/s, 키 보유 시 10req/s.
+    # 검색 1건당 수십 명의 의사를 동시에 조회하므로, 스로틀이 없으면 NCBI가
+    # 대부분의 요청을 차단(429)해 h-index가 0으로 떨어진다.
+    _esearch_lock = asyncio.Lock()
+    _esearch_last = 0.0
+
     def __init__(self):
         self._cache: dict = {}
+
+    async def _throttle_esearch(self):
+        interval = 0.11 if NCBI_API_KEY else 0.35
+        async with PubMedClient._esearch_lock:
+            wait = interval - (time.monotonic() - PubMedClient._esearch_last)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            PubMedClient._esearch_last = time.monotonic()
 
     async def get_h_index(self, doctor_name: str, hospital_name: str,
                            name_en: str = "") -> dict:
@@ -122,22 +138,33 @@ class PubMedClient:
         if NCBI_API_KEY:
             params["api_key"] = NCBI_API_KEY
 
+        # 동시 검색 시 NCBI가 일시적으로 429를 반환할 수 있어, 스로틀 + 최대 3회 재시도
+        last_status = None
         async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=_ssl_ctx())) as session:
-            async with session.get(ESEARCH_URL, params=params, timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)) as resp:
-                if resp.status != 200:
-                    return []
-                data = await resp.json(content_type=None)
-                return data.get("esearchresult", {}).get("idlist", [])
+            for attempt in range(3):
+                await self._throttle_esearch()   # NCBI rate limit 준수
+                try:
+                    async with session.get(ESEARCH_URL, params=params,
+                                           timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT)) as resp:
+                        if resp.status == 200:
+                            data = await resp.json(content_type=None)
+                            return data.get("esearchresult", {}).get("idlist", [])
+                        last_status = resp.status
+                except Exception as e:
+                    last_status = str(e)
+                await asyncio.sleep(0.6 * (attempt + 1))   # 백오프 후 재시도
+        # 재시도 후에도 실패 → 예외로 올려 0 캐싱을 막고 다음 검색에서 재시도
+        raise RuntimeError(f"esearch failed after retries (last={last_status})")
 
     async def _get_citations(self, pmids: list[str]) -> list[int]:
-        """OpenAlex API로 PMID별 인용수(cited_by_count) 일괄 조회"""
+        """NIH iCite API로 PMID별 인용수(citation_count) 일괄 조회 (무료·무제한)"""
         if not pmids:
             return []
 
         counts_map: dict[str, int] = {}
-        batch_size = 50   # OpenAlex OR 필터 권장 상한
+        batch_size = 200   # iCite는 대량 조회에 관대함
 
-        headers = {"User-Agent": f"hospital-agent/1.0 (mailto:{OPENALEX_MAILTO})"}
+        headers = {"User-Agent": "hospital-agent/1.0"}
         async with aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=_ssl_ctx()), headers=headers
         ) as session:
@@ -145,25 +172,19 @@ class PubMedClient:
                 batch = pmids[i:i + batch_size]
                 try:
                     async with session.get(
-                        OPENALEX_URL,
-                        params={
-                            "filter": "pmid:" + "|".join(batch),
-                            "per-page": "200",
-                            "select": "ids,cited_by_count",
-                            "mailto": OPENALEX_MAILTO,
-                        },
+                        ICITE_URL,
+                        params={"pmids": ",".join(batch)},
                         timeout=aiohttp.ClientTimeout(total=REQUEST_TIMEOUT),
                     ) as resp:
                         if resp.status == 200:
                             data = await resp.json(content_type=None)
-                            for work in data.get("results", []):
-                                pmid_url = (work.get("ids", {}) or {}).get("pmid", "") or ""
-                                pmid = pmid_url.rstrip("/").split("/")[-1]
+                            for pub in data.get("data", []):
+                                pmid = str(pub.get("pmid", "") or pub.get("_id", ""))
                                 if pmid:
-                                    counts_map[pmid] = int(work.get("cited_by_count", 0) or 0)
+                                    counts_map[pmid] = int(pub.get("citation_count", 0) or 0)
                 except Exception as e:
-                    print(f"[OpenAlex] batch {i//batch_size+1} error: {e}")
+                    print(f"[iCite] batch {i//batch_size+1} error: {e}")
 
-                await asyncio.sleep(0.1)   # polite pool 호출 간격
+                await asyncio.sleep(0.05)
 
         return [counts_map.get(pid, 0) for pid in pmids]

@@ -473,6 +473,10 @@ class SMCCrawler(HospitalCrawlerBase):
         "흉부외과": "thoracic-and-cardiovascular-surgery",
         "유방외과": "breast-surgery",
         "내분비외과": "endocrine-surgery",
+        # 수술 목적 라우팅 대상 외과 (위암/대장암/간암 등)
+        "위장관외과": "gastrointestinal-surgery",
+        "대장항문외과": "colon-and-rectal-surgery",
+        "간담췌외과": "hepatobiliary-pancreatic-surgery",
     }
 
     async def get_doctors(self, department: str) -> list[dict]:

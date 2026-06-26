@@ -40,6 +40,11 @@ kci_client = KCIClient()
 crawler = CrawlerOrchestrator()
 kcd_mapper = KCDMapper()
 
+# 의사 보강(PubMed/OpenAlex/Naver/KCI)의 전역 동시성 제한.
+# 한 검색에 수십~수백 명을 보강하므로, 제한이 없으면 외부 API(NCBI/OpenAlex)의
+# rate limit을 초과해 h-index/인용이 0으로 떨어진다.
+_ENRICH_SEM = asyncio.Semaphore(6)
+
 
 # ─── Request/Response Models ────────────────────────
 class SearchRequest(BaseModel):
@@ -181,16 +186,18 @@ async def _enrich_doctor(doc: dict, hospital_id: str, hira_data: dict) -> dict:
     }
 
     # PubMed(국제) + Naver(뉴스) + KCI(국내) 동시 호출
-    # 병원 제공 영문명(name_en)이 있으면 PubMed 검색 정확도가 크게 향상됨
-    pubmed_task = pubmed_client.get_h_index(
-        doc["name"], hospital_names[hospital_id], name_en=doc.get("name_en", "")
-    )
-    naver_task = naver_client.get_news_count(doc["name"], hospital_names[hospital_id])
-    kci_task = kci_client.search_papers(doc["name"], hospital_names[hospital_id])
+    # 병원 제공 영문명(name_en)이 있으면 PubMed 검색 정확도가 크게 향상됨.
+    # 세마포어로 동시 보강 수를 제한해 외부 API rate limit 초과를 방지.
+    async with _ENRICH_SEM:
+        pubmed_task = pubmed_client.get_h_index(
+            doc["name"], hospital_names[hospital_id], name_en=doc.get("name_en", "")
+        )
+        naver_task = naver_client.get_news_count(doc["name"], hospital_names[hospital_id])
+        kci_task = kci_client.search_papers(doc["name"], hospital_names[hospital_id])
 
-    pub_result, news_count, kci_result = await asyncio.gather(
-        pubmed_task, naver_task, kci_task, return_exceptions=True
-    )
+        pub_result, news_count, kci_result = await asyncio.gather(
+            pubmed_task, naver_task, kci_task, return_exceptions=True
+        )
 
     if isinstance(pub_result, Exception):
         pub_result = {"h_index": 0, "papers": 0, "citations": 0}
