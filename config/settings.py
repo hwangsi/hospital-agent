@@ -26,6 +26,10 @@ NAVER_SEARCH_URL = "https://openapi.naver.com/v1/search/news.json"
 NCBI_API_KEY = os.getenv("NCBI_API_KEY", "")  # 선택사항, 없으면 rate limit 3/sec
 NCBI_BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
+# ─── OpenAlex (저자 엔티티 H-index, 1순위) ───────────
+# polite pool 메일 — 안정적 레이트리밋(10req/s). 키 불필요.
+OPENALEX_MAILTO = os.getenv("OPENALEX_MAILTO", "hwangsi49@gmail.com")
+
 # ─── 병원 예약 페이지 URL ────────────────────────────
 HOSPITAL_URLS = {
     "snuh": {

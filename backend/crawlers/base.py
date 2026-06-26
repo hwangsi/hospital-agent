@@ -116,8 +116,34 @@ def _match_dept(candidates, department: str):
     return None
 
 
+# ── 병원별 "의료진 소개" 페이지 딥링크 빌더 (2026-06 실브라우저 검증) ──
+#   amc/smc/sev/snubh = 보유 식별자로 프로필 직링크, snuh = 통합검색(내부사번 미보유)
+def _amc_profile(emp_id: str) -> str:
+    return (f"https://www.amc.seoul.kr/asan/staff/base/staffBaseInfoDetail.do?drEmpId={emp_id}"
+            if emp_id else "")
+
+def _smc_profile(dr_no: str) -> str:
+    return (f"https://www.samsunghospital.com/m/smc/reservation/common/doctorProfile.do?DR_NO={dr_no}"
+            if dr_no else "")
+
+def _sev_profile(emp_no: str, dept_seq: str) -> str:
+    # emp_no 는 이미 URL 인코딩된 암호화 blob → 재인코딩 금지
+    return (f"https://sev.severance.healthcare/sev/doctor/doctor-view.do?empNo={emp_no}&deptSeq={dept_seq}"
+            if emp_no and dept_seq else "")
+
+def _snubh_profile(dept_cd: str, dr_sid: str, stf_no: str) -> str:
+    return (f"https://www.snubh.org/medical/drIntroduce.do?sDpCd={dept_cd}&sDrSid={dr_sid}"
+            f"&sDrStfNo={stf_no}&sDpTp=O" if dr_sid and stf_no else "")
+
+def _snuh_search(name: str) -> str:
+    from urllib.parse import quote
+    return (f"https://search.snuh.org/search/search.jsp?wnquery={quote(name)}"
+            f"&searchTarget=re_doctor&detailView=none" if name else "")
+
+
 def _make_doctor(name: str, position: str, department: str, specialty: str,
-                 emp_id: str = "", reservation_url: str = "", name_en: str = "") -> dict:
+                 emp_id: str = "", reservation_url: str = "", name_en: str = "",
+                 profile_url: str = "") -> dict:
     """크롤러 공통 의사 레코드 포맷."""
     return {
         "name": _clean_ws(name),
@@ -130,6 +156,7 @@ def _make_doctor(name: str, position: str, department: str, specialty: str,
         "surgeries": 0,
         "emp_id": emp_id,          # 병원 내부 의사 식별자
         "reservation_url": reservation_url,
+        "profile_url": profile_url,  # 병원 웹사이트의 '의료진 소개' 직링크
     }
 
 
@@ -245,7 +272,8 @@ class SNUHCrawler(HospitalCrawlerBase):
                 spec_ps = c.select(".doctor-concentration-wrap p")
                 specialty = spec_ps[1].get_text(" ", strip=True) if len(spec_ps) > 1 else ""
                 doctors.append(_make_doctor(name, "", department, specialty,
-                                            emp_id=dr_id, name_en=name_en))
+                                            emp_id=dr_id, name_en=name_en,
+                                            profile_url=_snuh_search(name)))
             if len(cards) < 5:                 # 마지막 페이지
                 break
         return doctors
@@ -433,6 +461,7 @@ class AMCCrawler(HospitalCrawlerBase):
                 "surgeries": 0,
                 "emp_id": c.get("empId", ""),
                 "reservation_url": reserv,            # 실제 의사 프리필 예약 링크
+                "profile_url": _amc_profile(c.get("empId", "")),
             })
         return doctors
 
@@ -575,7 +604,8 @@ class SMCCrawler(HospitalCrawlerBase):
                     break
                 spec_el = c.select_one("p.card-content-text")
                 specialty = spec_el.get_text(" ", strip=True) if spec_el else ""
-                doctors.append(_make_doctor(name, pos, department, specialty, emp_id=dr_no))
+                doctors.append(_make_doctor(name, pos, department, specialty, emp_id=dr_no,
+                                            profile_url=_smc_profile(dr_no)))
             # 페이지네이션: totalPageCount 기준. page 파라미터가 무시되면 신규 0건으로 종료.
             total_el = soup.select_one("#totalPageCount")
             total_val = total_el.get("value", "1") if total_el else "1"
@@ -647,13 +677,15 @@ class SeveranceCrawler(HospitalCrawlerBase):
             name = (d.get("nm") or "").strip()
             if not name:
                 continue
+            emp_no = d.get("empNo", "") or ""
             doctors.append(_make_doctor(
                 name,
                 (d.get("ofcps") or "").strip(),
                 department,
                 (d.get("clnicRealm") or "").strip(),
-                emp_id=d.get("empNo", "") or "",
+                emp_id=emp_no,
                 name_en=(d.get("nmEn") or "").strip(),
+                profile_url=_sev_profile(emp_no, str(seq)),
             ))
         return doctors
 
@@ -749,12 +781,18 @@ class SNUBHCrawler(HospitalCrawlerBase):
             spec_el = c.select_one("dl.bh_doctor_dept_n dd")
             specialty = spec_el.get_text(" ", strip=True) if spec_el else ""
             dr_no = ""
+            stf_no = ""
             intro = c.select_one("input.bh_doctor_btn_intro")
             if intro:
-                m = re.search(r"'sDrSid'\s*:\s*'(\d+)'", intro.get("onclick", ""))
+                oc = intro.get("onclick", "")
+                m = re.search(r"'sDrSid'\s*:\s*'(\d+)'", oc)
                 if m:
                     dr_no = m.group(1)
-            doctors.append(_make_doctor(name, pos, department, specialty, emp_id=dr_no))
+                ms = re.search(r"'sDrStfNo'\s*:\s*'(\w+)'", oc)
+                if ms:
+                    stf_no = ms.group(1)
+            doctors.append(_make_doctor(name, pos, department, specialty, emp_id=dr_no,
+                                        profile_url=_snubh_profile(code, dr_no, stf_no)))
         return doctors
 
 

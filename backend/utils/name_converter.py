@@ -78,8 +78,12 @@ def _variants(surname_eng: str, given_parts: list[str]) -> list[str]:
     initials = "".join(p[0] for p in given_parts).upper()
     joined = " ".join(given_parts)
     hyphen = "-".join(given_parts)
-    variants = [
-        f"{surname_eng} {initials}",   # Yoon JH  ← PubMed 'LastName Initials'에 가장 강건
+    variants = []
+    # 외자(단일 글자) 이니셜 변형 금지: 'Kim K'[Author] 는 동명이인(예: 서울대 Kim K* 전부)을
+    # 긁어와 500 cap·h-index 왜곡을 유발한다. 2글자 이상 이니셜만 허용('Yoon JH').
+    if len(initials) >= 2:
+        variants.append(f"{surname_eng} {initials}")   # Yoon JH ← PubMed 'LastName Initials'
+    variants += [
         f"{surname_eng} {joined}",     # Yoon Jeong Hwan
         f"{surname_eng} {hyphen}",     # Yoon Jeong-Hwan
         f"{joined} {surname_eng}",     # Jeong Hwan Yoon

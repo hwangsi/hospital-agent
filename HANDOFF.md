@@ -96,6 +96,16 @@ NCBI_API_KEY = 빈값(선택사항이지만 넣으면 esearch 3→10req/s로 빨
 2. 선택한 방안(A/B)으로 실데이터 경로 구현 + 검증.
 3. (선택) HIRA가 진짜가 되면 `_get_fallback_hira_stats`도 KCI/더미처럼 제거 검토.
 
+## 4.5 H-index — OpenAlex 저자 엔티티 전환 (이번 세션 추가)
+PubMed 이름-문자열 매칭의 동명이인 오염을 OpenAlex disambiguation 저자 엔티티로 교체.
+- **근본 버그 발견**: `english_name_to_pubmed_variants('Kidong Kim')`가 외자 이니셜 `Kim K` 생성 → "서울대 Kim K* 전부" 긁어와 500 cap + h 왜곡. 김기동 실측 h=12(가짜)였음.
+- **6.1 즉시 픽스(적용됨)**: `_variants`가 단일 글자 이니셜 변형 미생성(2글자 `Yoon JH`는 유지). → 김기동 12→**23**.
+- **OpenAlex 클라이언트(`backend/api/openalex.py`)**: `/authors?search=&filter=affiliations.institution.id` → 이름토큰 필터 → 동명+동일기관 자동병합 → h=max(summary_stats.h_index), papers/cites 합산. ORCID 있으면 최우선. 레이트리밋 방어(polite pool+스로틀+백오프) + **실패 시 PubMed(수정본) 폴백**. ACCURATE 모드(works 합집합 h)도 구현.
+- `main.py`: `hindex_client = OpenAlexClient(pubmed_fallback=pubmed_client)`로 교체, 응답에 `hindex_source` 추가.
+- 설계/비교 문서: `docs/H-INDEX-OPENALEX-DESIGN.md` (researcher-kg ↔ 우리 매핑 포함).
+- ⚠️ **미검증**: 구현 IP가 OpenAlex 429 지속 차단으로 라이브 경로 미검증(폴백·순수함수·병합 로직은 검증됨). 레이트리밋 해제 후 `scripts/validate_openalex.py` 1회 실행 → source='openalex' 확인 + 기관ID 핀.
+- 교차검증(Semantic Scholar): 김기동 엔티티 h=30 → OpenAlex도 유사 예상.
+
 ## 5. 이번 세션에서 한 일 (최근 커밋, 전부 master에 있음/푸시 예정)
 - 5개 병원 **실제 크롤러** 구현·검증 (AMC=Playwright/EUC-KR, 나머지 httpx; SEV는 JSON API)
 - **h-index 실데이터화**: PubMed esearch + NIH iCite. 영문명 우선순위(병원 영문명 → 자모 로마자).

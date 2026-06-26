@@ -375,7 +375,10 @@ color:idx===0?'#B45309':idx===1?'var(--ink2)':idx===2?'#C2410C':'var(--ink3)'}}>
 <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
 {doc.slots.map((sl,si)=><div key={si} style={{padding:'9px 14px',borderRadius:8,background:'#F8FAFC',border:'1px solid var(--border)',fontSize:13}}><b>{fD(sl.date)}</b> {sl.time}</div>)}
 </div></div>
-<button className="btn btn-primary btn-mid" style={{background:h.color}} onClick={e=>{e.stopPropagation();onSelect(doc);}}>이 의사로 예약 →</button>
+<div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+<button className="btn btn-primary btn-mid" style={{background:h.color,flex:'1 1 200px'}} onClick={e=>{e.stopPropagation();onSelect(doc);}}>이 의사로 예약 →</button>
+{doc.profileUrl&&<a className="btn btn-secondary btn-mid" href={doc.profileUrl} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} style={{flex:'0 1 auto',textDecoration:'none',display:'inline-flex',alignItems:'center',justifyContent:'center'}}>🔗 병원 소개페이지</a>}
+</div>
 </div>}
 </div>);})}
 </div>
@@ -544,6 +547,7 @@ const startSearch = async () => {
         citations: doc.citations,
         docSurgeries: doc.doc_surgeries,
         hiraData: doc.hira_data,
+        profileUrl: doc.profile_url || "",
         slots: doc.available_slots.map(s => ({ date: s.date, time: s.time }))
       }));
       setDoctors(mapped);

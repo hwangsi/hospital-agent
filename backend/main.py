@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.api.hira import HIRAClient
 from backend.api.pubmed import PubMedClient
+from backend.api.openalex import OpenAlexClient
 from backend.api.naver_news import NaverNewsClient
 from backend.crawlers.base import CrawlerOrchestrator
 from backend.utils.kcd_mapper import KCDMapper
@@ -34,6 +35,8 @@ app.add_middleware(
 # ─── Clients (싱글톤) ────────────────────────────────
 hira_client = HIRAClient()
 pubmed_client = PubMedClient()
+# H-index 1순위 = OpenAlex 저자 엔티티, 실패/레이트리밋 시 PubMed(수정본) 폴백.
+hindex_client = OpenAlexClient(pubmed_fallback=pubmed_client)
 naver_client = NaverNewsClient()
 crawler = CrawlerOrchestrator()
 kcd_mapper = KCDMapper()
@@ -185,8 +188,12 @@ async def _enrich_doctor(doc: dict, hospital_id: str, hira_data: dict) -> dict:
     # 병원 제공 영문명(name_en)이 있으면 PubMed 검색 정확도가 크게 향상됨.
     # 세마포어로 동시 보강 수를 제한해 외부 API rate limit 초과를 방지.
     async with _ENRICH_SEM:
-        pubmed_task = pubmed_client.get_h_index(
-            doc["name"], hospital_names[hospital_id], name_en=doc.get("name_en", "")
+        # 1순위 OpenAlex 저자 엔티티 → 실패/레이트리밋 시 PubMed(수정본) 자동 폴백
+        pubmed_task = hindex_client.get_h_index(
+            doc["name"], hospital_names[hospital_id],
+            name_en=doc.get("name_en", ""),
+            department=doc.get("department", ""),
+            orcid=doc.get("orcid", ""),
         )
         naver_task = naver_client.get_news_count(doc["name"], hospital_names[hospital_id])
 
@@ -211,11 +218,13 @@ async def _enrich_doctor(doc: dict, hospital_id: str, hira_data: dict) -> dict:
         "news_count": news_count,
         "papers": pub_result.get("papers", 0),
         "citations": pub_result.get("citations", 0),
+        "hindex_source": pub_result.get("source", ""),   # openalex | pubmed-fallback
         "doc_surgeries": doc.get("surgeries", 0),
         "hira_data": hira_data,
         "available_slots": doc.get("available_slots", []),
         "emp_id": doc.get("emp_id", ""),
         "reservation_url": doc.get("reservation_url", ""),
+        "profile_url": doc.get("profile_url", ""),
     }
 
 
