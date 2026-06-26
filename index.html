@@ -597,19 +597,28 @@ const confirmReservation = async (reservationData) => {
   }
 };
 
+const goHome=()=>{setStep(0);setPd({});setDoc(null);setRes(null);setDoctors([]);setSearchDone(false);};
+
 return(<div>
 <div className="header"><div className="header-inner">
 <div className="header-tag">BIG 5 HOSPITAL AGENT</div>
-<div className="header-title">빅5 병원 통합 예약 에이전트</div>
+<div className="header-title" onClick={goHome} style={{cursor:'pointer'}} title="처음으로">빅5 병원 통합 예약 에이전트</div>
 <div className="header-sub">서울대 · 아산 · 삼성 · 세브란스 · 분당서울대 ┃ 심평원·건보공단 연동</div>
 </div></div>
 <div className="container">
 <Steps current={step>1?step-1:step} steps={steps}/>
+{step>0&&(
+<button onClick={goHome}
+style={{background:'transparent',border:'1px solid #E2E8F0',color:'#64748B',padding:'7px 14px',
+borderRadius:8,fontSize:13,fontWeight:700,cursor:'pointer',marginBottom:16,display:'inline-flex',alignItems:'center',gap:6}}>
+↺ 처음으로
+</button>
+)}
 {step===0&&<S1 data={pd} onChange={setPd} onNext={startSearch}/>}
 {step===1&&<S2 onDone={()=>setStep(2)} ready={searchDone}/>}
 {step===2&&<S3 patientData={pd} doctors={doctors} onSelect={d=>{setDoc(d);setStep(3);}}/>}
 {step===3&&doc&&<S4 doctor={doc} patientData={pd} onBack={()=>setStep(2)} onConfirm={confirmReservation}/>}
-{step===4&&res&&<S5 reservation={res} onReset={()=>{setStep(0);setPd({});setDoc(null);setRes(null);setDoctors([]);}}/>}
+{step===4&&res&&<S5 reservation={res} onReset={goHome}/>}
 </div>
 </div>);}
 
