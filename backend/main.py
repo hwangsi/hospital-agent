@@ -19,6 +19,7 @@ from backend.api.naver_news import NaverNewsClient
 from backend.crawlers.base import CrawlerOrchestrator
 from backend.utils.kcd_mapper import KCDMapper
 from backend.utils.encryption import encrypt_ssn
+from backend.utils.hindex_cache import HIndexCache
 
 app = FastAPI(
     title="빅5 병원 통합 예약 에이전트 API",
@@ -40,6 +41,10 @@ pubmed_client = PubMedClient()
 # OpenAlex 가 429일 땐 회로차단 후 S2 가 1요청으로 최종 h-index를 빠르게 제공.
 _s2_client = SemanticScholarClient(pubmed_fallback=pubmed_client)
 hindex_client = OpenAlexClient(pubmed_fallback=_s2_client)
+# L2 영속 캐시 — 재시작 후에도 유지 (openalex/S2 7일, pubmed-fallback 1일, 0은 미저장)
+hindex_cache = HIndexCache(os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    ".cache", "hindex.sqlite3"))
 naver_client = NaverNewsClient()
 crawler = CrawlerOrchestrator()
 kcd_mapper = KCDMapper()
@@ -207,6 +212,21 @@ async def _fetch_hospital_data(
     return [d for d in enriched if not isinstance(d, Exception)]
 
 
+async def _get_hindex_cached(doctor_name: str, hospital_name: str,
+                             name_en: str = "", department: str = "",
+                             orcid: str = "") -> dict:
+    """h-index 체인 호출을 L2 영속 캐시로 감싼다. 키는 클라이언트 L1과 동형."""
+    key = f"{(name_en or doctor_name).strip()}:{hospital_name}"
+    cached = hindex_cache.get(key)
+    if cached is not None:
+        return cached
+    result = await hindex_client.get_h_index(
+        doctor_name, hospital_name,
+        name_en=name_en, department=department, orcid=orcid)
+    hindex_cache.set(key, result)
+    return result
+
+
 async def _enrich_doctor(doc: dict, hospital_id: str, hira_data: dict) -> dict:
     """의사 1명에 대해 H-index, 뉴스 수 추가"""
     hospital_names = {
@@ -220,7 +240,8 @@ async def _enrich_doctor(doc: dict, hospital_id: str, hira_data: dict) -> dict:
     # 세마포어로 동시 보강 수를 제한해 외부 API rate limit 초과를 방지.
     async with _ENRICH_SEM:
         # 1순위 OpenAlex 저자 엔티티 → 실패/레이트리밋 시 PubMed(수정본) 자동 폴백
-        pubmed_task = hindex_client.get_h_index(
+        # L2 영속 캐시(디스크) 히트 시 외부 API 호출 자체를 생략.
+        pubmed_task = _get_hindex_cached(
             doc["name"], hospital_names[hospital_id],
             name_en=doc.get("name_en", ""),
             department=doc.get("department", ""),

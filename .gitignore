@@ -14,3 +14,6 @@ scratch_scrape.py
 
 # OMC tooling state
 .omc/
+
+# h-index 영속 캐시 (backend/utils/hindex_cache.py)
+.cache/
