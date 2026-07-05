@@ -20,6 +20,7 @@ from backend.crawlers.base import CrawlerOrchestrator
 from backend.utils.kcd_mapper import KCDMapper
 from backend.utils.encryption import encrypt_ssn
 from backend.utils.hindex_cache import HIndexCache
+from backend.utils.reservation_store import ReservationStore
 
 app = FastAPI(
     title="빅5 병원 통합 예약 에이전트 API",
@@ -42,9 +43,10 @@ pubmed_client = PubMedClient()
 _s2_client = SemanticScholarClient(pubmed_fallback=pubmed_client)
 hindex_client = OpenAlexClient(pubmed_fallback=_s2_client)
 # L2 영속 캐시 — 재시작 후에도 유지 (openalex/S2 7일, pubmed-fallback 1일, 0은 미저장)
-hindex_cache = HIndexCache(os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    ".cache", "hindex.sqlite3"))
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+hindex_cache = HIndexCache(os.path.join(_BASE_DIR, ".cache", "hindex.sqlite3"))
+# 예약 영속 저장 — PII 포함이라 var/ 는 gitignore (SSN 은 has_ssn 불리언만)
+reservation_store = ReservationStore(os.path.join(_BASE_DIR, "var", "reservations.sqlite3"))
 naver_client = NaverNewsClient()
 crawler = CrawlerOrchestrator()
 kcd_mapper = KCDMapper()
@@ -299,9 +301,10 @@ async def make_reservation(req: ReservationRequest):
         time=req.slot_time,
     )
 
-    # 예약 정보 저장 (DB 연동 시)
+    import uuid
     reservation_record = {
-        "id": f"RES-{datetime.now().strftime('%Y%m%d%H%M%S')}",
+        # 타임스탬프만으로는 동초 충돌 → 짧은 랜덤 접미사
+        "id": f"RES-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}",
         "hospital_id": req.hospital_id,
         "doctor_id": req.doctor_id,
         "slot": {"date": req.slot_date, "time": req.slot_time},
@@ -315,12 +318,41 @@ async def make_reservation(req: ReservationRequest):
         "reservation_url": reservation_url,
     }
 
+    # 영속 저장 (var/reservations.sqlite3) — 저장 실패해도 프리필 흐름은 계속
+    try:
+        reservation_store.add(reservation_record)
+    except Exception as e:
+        print(f"[Reserve] store error: {e}")
+
     return {
         "success": True,
         "reservation": reservation_record,
         "redirect_url": reservation_url,
         "message": "예약 정보가 준비되었습니다. 병원 사이트에서 본인인증 후 최종 확정해주세요.",
     }
+
+
+@app.get("/api/reservations")
+async def list_reservations(limit: int = 50):
+    """저장된 예약 목록 (최신순)"""
+    return {"reservations": reservation_store.list(limit=limit)}
+
+
+@app.get("/api/reservations/{rid}")
+async def get_reservation(rid: str):
+    """예약 단건 조회"""
+    rec = reservation_store.get(rid)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="reservation not found")
+    return rec
+
+
+@app.patch("/api/reservations/{rid}")
+async def update_reservation_status(rid: str, status: str):
+    """예약 상태 갱신 (pending → confirmed / cancelled 등)"""
+    if not reservation_store.update_status(rid, status):
+        raise HTTPException(status_code=404, detail="reservation not found")
+    return reservation_store.get(rid)
 
 
 @app.get("/api/hira/{hospital_id}")

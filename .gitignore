@@ -17,3 +17,6 @@ scratch_scrape.py
 
 # h-index 영속 캐시 (backend/utils/hindex_cache.py)
 .cache/
+
+# 예약 영속 저장 — PII 포함, 절대 커밋 금지 (backend/utils/reservation_store.py)
+var/

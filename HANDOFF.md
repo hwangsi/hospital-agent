@@ -107,7 +107,7 @@ socketserver.TCPServer(("127.0.0.1",8080), H).serve_forever()
 - ~~HIRA 미적재 암종 CSV 확충~~ ✅ SMC 6종 적재 완료(§4, 2026-07-05). 잔여(AMC 갑상선·SEV)는 공개 데이터 없음 확인 — 종결. 사망률/합병증은 공개 안 됨(구조적).
 - ~~SNUH 외과 세부분과~~ ✅ 해결(2026-07-05): resolver 1순위를 `/reservation/meddept/main.do`(전 진료과 서버렌더, `treatItemWrap`+`goDetail('코드')`)로 교체 — 위장관외과 GIS·대장항문외과 CRS·간담췌외과 HBPS·유방내분비외과 BEN 해석됨. `_match_dept` 부분일치를 최장(가장 구체적) 과명 우선으로 수정 → 흉부외과가 '외과'(GS)가 아닌 '심장혈관흉부외과'(TS)로 매칭(1→15명). 위암 수술 검색 시 SNUH 6명 중 5명(위암 전문) 반환 검증.
 - ~~유방암·갑상선암 수술과 라우팅~~ ✅ 해결(2026-07-05): 두 질환은 `dept` 자체가 외과(유방외과/내분비외과)라 `surgery_dept` 불필요 — 진짜 문제는 병원별 과명 변형. `_DEPT_ALIASES`에 유방외과→[유방내분비외과 등]·내분비외과→[갑상선내분비외과 등] 추가('유방외과'는 '유방내분비외과'의 연속 부분문자열이 아니라 별칭 필수). 5개 병원 라이브 검증: 유방외과 snuh10/amc19/smc17/sev5/snubh33, 내분비외과 snuh10/amc8/smc4/sev7/snubh33(snubh는 외과 전체→필터 설계). 전문분야 필터: 유방암 snuh10→6·snubh33→4, 갑상선암 snuh10→3·snubh33→4.
-- `/api/reserve` 인메모리(미저장), AMC 실제 예약 URL 미연동.
+- ~~`/api/reserve` 미저장~~ ✅ 영속화(2026-07-05): `var/reservations.sqlite3`(`backend/utils/reservation_store.py`, PII 포함이라 var/는 gitignore·SSN은 has_ssn 불리언만). 신규 API: GET `/api/reservations`(목록)·GET/PATCH `/api/reservations/{id}`(단건/상태갱신). TestClient로 저장→조회→상태갱신→재시작 후 조회 검증. AMC 실제 예약 URL은 여전히 미연동.
 - ~~h-index 캐시 영속화~~ ✅ 완료(2026-07-05, §9): SQLite L2, 재시작 검증(1.46s→0.7ms).
 - ~~NCBI 키~~ ✅ 등록 완료(2026-07-05, §3). 첫 검색 속도는 h-index L2 캐시(§9)+NCBI 10req/s로 대부분 해소 — 남은 건 크롤링 자체 시간뿐.
 
