@@ -93,6 +93,9 @@ class ReservationRequest(BaseModel):
     ssn: Optional[str] = None         # 주민등록번호 (선택)
     address: Optional[str] = None     # 주소 (선택)
     notes: Optional[str] = None
+    # 크롤링된 의사 프리필 예약 딥링크(현재 AMC 제공). 암호화 식별자를 포함해
+    # doctor_id 로 합성 불가 → 검색 응답의 값을 그대로 되돌려 받는다.
+    reservation_url: Optional[str] = None
 
 
 # ─── Endpoints ───────────────────────────────────────
@@ -282,6 +285,22 @@ async def _enrich_doctor(doc: dict, hospital_id: str, hira_data: dict) -> dict:
     }
 
 
+def _is_hospital_url(url: str) -> bool:
+    """빅5 병원 공식 도메인의 https URL 인지 검증 (오픈 리다이렉트 방지)."""
+    from urllib.parse import urlparse
+    from config.settings import HOSPITAL_URLS
+    try:
+        p = urlparse(url)
+    except Exception:
+        return False
+    if p.scheme != "https" or not p.hostname:
+        return False
+    allowed = {urlparse(u["home"]).hostname for u in HOSPITAL_URLS.values()}
+    host = p.hostname.lower()
+    # 서브도메인 허용 (예: cancer.amc.seoul.kr) — 등록 도메인 접미사 일치
+    return any(host == a or host.endswith("." + a.split(".", 1)[-1]) for a in allowed)
+
+
 @app.post("/api/reserve")
 async def make_reservation(req: ReservationRequest):
     """
@@ -293,13 +312,19 @@ async def make_reservation(req: ReservationRequest):
     if req.ssn:
         encrypted_ssn = encrypt_ssn(req.ssn)
 
-    # 병원별 예약 페이지 URL 생성 (프리필 파라미터 포함)
-    reservation_url = crawler.build_reservation_url(
-        hospital_id=req.hospital_id,
-        doctor_id=req.doctor_id,
-        date=req.slot_date,
-        time=req.slot_time,
-    )
+    # 크롤링된 의사 프리필 딥링크(AMC 등)가 있으면 우선 사용 — 병원 도메인 검증 필수
+    # (클라이언트가 보내는 값이므로 임의 사이트로의 리다이렉트를 차단).
+    reservation_url = ""
+    if req.reservation_url and _is_hospital_url(req.reservation_url):
+        reservation_url = req.reservation_url
+    if not reservation_url:
+        # 폴백: 병원별 예약 페이지 URL 생성 (프리필 파라미터 포함)
+        reservation_url = crawler.build_reservation_url(
+            hospital_id=req.hospital_id,
+            doctor_id=req.doctor_id,
+            date=req.slot_date,
+            time=req.slot_time,
+        )
 
     import uuid
     reservation_record = {

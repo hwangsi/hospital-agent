@@ -547,6 +547,7 @@ const startSearch = async () => {
         citations: doc.citations,
         hiraData: doc.hira_data,
         profileUrl: doc.profile_url || "",
+        reservationUrl: doc.reservation_url || "",
         slots: doc.available_slots.map(s => ({ date: s.date, time: s.time }))
       }));
       // 개인 수술건수는 심평원에 없음 → '기관 연간수술 ÷ 해당 기관 의사수'로 평균 산출
@@ -592,7 +593,8 @@ const confirmReservation = async (reservationData) => {
       phone: reservationData.phone,
       ssn: reservationData.ssn || null,
       address: reservationData.address || null,
-      notes: reservationData.notes || null
+      notes: reservationData.notes || null,
+      reservation_url: reservationData.doctor.reservationUrl || null
     };
     
     const response = await fetch('http://127.0.0.1:8000/api/reserve', {
