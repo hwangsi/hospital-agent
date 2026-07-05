@@ -110,9 +110,12 @@ def _match_dept(candidates, department: str):
     for term in terms:                       # 3) 부분 일치 — 3글자 이상 어휘만
         if len(term) < 3:
             continue
-        for name, val in cand:
-            if term in name or name in term:
-                return val
+        matches = [(name, val) for name, val in cand
+                   if term in name or name in term]
+        if matches:
+            # 가장 구체적인(긴) 과명 우선 — '흉부외과'가 후보 '외과'(먼저 나옴)가 아니라
+            # '심장혈관흉부외과'에 매칭되도록 (SNUH main.do 는 '외과'도 후보에 있음).
+            return max(matches, key=lambda nv: len(nv[0]))[1]
     return None
 
 
@@ -192,7 +195,11 @@ class SNUHCrawler(HospitalCrawlerBase):
     서울대학교병원 크롤러 — httpx 기반 (2026-06 실검증, 서버사이드 렌더링/UTF-8).
 
     검증된 구조:
-      - 진료과 목록(상위): /reservation/meddept/dept.do
+      - 진료과명→코드 1순위: /reservation/meddept/main.do (2026-07 실검증)
+        전 진료과가 서버렌더됨 — div.treatItemWrap > span(과명) + goDetail('{코드}',..).
+        **외과 세부분과(위장관외과 GIS·대장항문외과 CRS·간담췌외과 HBPS·유방내분비외과 BEN)는
+        dept.do 앵커에 없어 이 경로로만 해석 가능.** 흉부외과는 '심장혈관흉부외과'(TS)로 부분일치.
+      - 폴백: 진료과 목록(상위) /reservation/meddept/dept.do
         내과 세부분과(소화기내과 등): /reservation/meddept/IM/mainIntro.do
         앵커 href '/meddept/{코드}/mainIntro.do' 텍스트로 진료과명→코드 매핑 (소화기내과→IMG)
       - 의료진 목록: /reservation/meddept/{코드}/mainDoctor.do?pageIndex={N}  (5명/페이지)
@@ -219,7 +226,15 @@ class SNUHCrawler(HospitalCrawlerBase):
             return []
 
     async def _resolve_code(self, client, department: str) -> str:
-        """진료과명 → 진료과 코드. 상위 진료과 목록 + 내과 세부분과 페이지를 함께 탐색."""
+        """진료과명 → 진료과 코드. main.do(전 진료과 서버렌더·외과 세부분과 포함)를 1순위로,
+        구 경로(상위 목록 dept.do + 내과 세부분과)를 폴백으로 탐색."""
+        try:
+            r = await client.get(f"{self.BASE}/reservation/meddept/main.do")
+            code = self._match_dept_treatwrap(r.text, department)
+            if code:
+                return code
+        except Exception as e:
+            print(f"[SNUH] dept resolve main.do: {e}")
         for url in (f"{self.BASE}/reservation/meddept/dept.do",
                     f"{self.BASE}/reservation/meddept/IM/mainIntro.do"):
             try:
@@ -230,6 +245,20 @@ class SNUHCrawler(HospitalCrawlerBase):
             except Exception as e:
                 print(f"[SNUH] dept resolve {url}: {e}")
         return ""
+
+    @staticmethod
+    def _match_dept_treatwrap(html: str, department: str) -> str:
+        """main.do 진료과 카드: div.treatItemWrap > span(과명) + goDetail('{코드}',..)."""
+        from bs4 import BeautifulSoup
+        import re
+        soup = BeautifulSoup(html, "lxml")
+        candidates = []
+        for w in soup.select("div.treatItemWrap"):
+            span = w.select_one("span")
+            m = re.search(r"goDetail\('([A-Za-z0-9]+)'", str(w))
+            if span and m:
+                candidates.append((span.get_text(), m.group(1)))
+        return _match_dept(candidates, department) or ""
 
     @staticmethod
     def _match_dept_anchor(html: str, department: str) -> str:

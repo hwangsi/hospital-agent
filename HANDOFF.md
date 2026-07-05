@@ -105,7 +105,8 @@ socketserver.TCPServer(("127.0.0.1",8080), H).serve_forever()
 ## 10. 알려진 한계 / 후속 후보
 - ~~h-index 라이브 검증~~ ✅ 완료(§6, 2026-07-05). 기관ID 핀도 적용.
 - ~~HIRA 미적재 암종 CSV 확충~~ ✅ SMC 6종 적재 완료(§4, 2026-07-05). 잔여(AMC 갑상선·SEV)는 공개 데이터 없음 확인 — 종결. 사망률/합병증은 공개 안 됨(구조적).
-- SNUH 외과 세부분과 미해결(수술 검색 시 SNUH 결과 적을 수 있음). SNUH resolver가 dept.do 상위+IM만 탐색.
+- ~~SNUH 외과 세부분과~~ ✅ 해결(2026-07-05): resolver 1순위를 `/reservation/meddept/main.do`(전 진료과 서버렌더, `treatItemWrap`+`goDetail('코드')`)로 교체 — 위장관외과 GIS·대장항문외과 CRS·간담췌외과 HBPS·유방내분비외과 BEN 해석됨. `_match_dept` 부분일치를 최장(가장 구체적) 과명 우선으로 수정 → 흉부외과가 '외과'(GS)가 아닌 '심장혈관흉부외과'(TS)로 매칭(1→15명). 위암 수술 검색 시 SNUH 6명 중 5명(위암 전문) 반환 검증.
+- (후속 후보) kcd_mapper 유방암·갑상선암에 `surgery_dept` 미지정 — SNUH 유방내분비외과(10명)까지 해석 가능해졌으니 추가 검토 가치 있음(단, 5개 병원 과명 변형 매칭 확인 필요).
 - `/api/reserve` 인메모리(미저장), AMC 실제 예약 URL 미연동.
 - h-index 캐시 영속화 미구현(설계문서 §3.4에 TTL 7일 제안).
 - 첫 검색 느림(레이트리밋 시 PubMed 폴백). NCBI 무료 키 넣으면 개선.
