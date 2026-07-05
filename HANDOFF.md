@@ -44,7 +44,7 @@ socketserver.TCPServer(("127.0.0.1",8080), H).serve_forever()
 | KCI (국내논문) | ❌ 제거됨 | 이전 세션 완전 삭제 |
 
 `.env`(gitignore): `NAVER_CLIENT_ID/SECRET`=실제, `HIRA_API_KEY`=실제(활성), `OPENALEX_MAILTO`=hwangsi49@gmail.com,
-`NCBI_API_KEY`=빈값(넣으면 esearch 3→10req/s).
+`NCBI_API_KEY`=실제(2026-07-05 등록·`X-RateLimit-Limit: 10` 라이브 확인 — esearch 3→10req/s, 스로틀 0.35→0.11s 자동).
 
 ## 4. HIRA(심평원) — 하이브리드 (완료·라이브 검증됨)
 **결정: 하이브리드** — 정량(수술건수)은 **CSV**, 적정성평가 "등급"은 **data.go.kr 실 API**.
@@ -109,7 +109,7 @@ socketserver.TCPServer(("127.0.0.1",8080), H).serve_forever()
 - ~~유방암·갑상선암 수술과 라우팅~~ ✅ 해결(2026-07-05): 두 질환은 `dept` 자체가 외과(유방외과/내분비외과)라 `surgery_dept` 불필요 — 진짜 문제는 병원별 과명 변형. `_DEPT_ALIASES`에 유방외과→[유방내분비외과 등]·내분비외과→[갑상선내분비외과 등] 추가('유방외과'는 '유방내분비외과'의 연속 부분문자열이 아니라 별칭 필수). 5개 병원 라이브 검증: 유방외과 snuh10/amc19/smc17/sev5/snubh33, 내분비외과 snuh10/amc8/smc4/sev7/snubh33(snubh는 외과 전체→필터 설계). 전문분야 필터: 유방암 snuh10→6·snubh33→4, 갑상선암 snuh10→3·snubh33→4.
 - `/api/reserve` 인메모리(미저장), AMC 실제 예약 URL 미연동.
 - ~~h-index 캐시 영속화~~ ✅ 완료(2026-07-05, §9): SQLite L2, 재시작 검증(1.46s→0.7ms).
-- 첫 검색 느림(레이트리밋 시 PubMed 폴백). NCBI 무료 키 넣으면 개선.
+- ~~NCBI 키~~ ✅ 등록 완료(2026-07-05, §3). 첫 검색 속도는 h-index L2 캐시(§9)+NCBI 10req/s로 대부분 해소 — 남은 건 크롤링 자체 시간뿐.
 
 ## 11. 커밋/푸시 상태
 - 전부 `master`에 푸시됨. 최근: `f178348`(평균수술수) `58156e3`(전문분야필터+S2) `0dedffa`(소개링크+OpenAlex) `806db84`(CSV) `ea19e41`(등급API).
