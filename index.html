@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>빅5 병원 통합 예약 에이전트</title>
+<title>빅5 병원 통합 의료진 검색 에이전트</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <style>
@@ -135,15 +135,13 @@ const SP={};Object.values(SP_GROUPS).forEach(g=>Object.assign(SP,g));
 const PU=[
 {id:"diagnosis",label:"진단",icon:"🔍",desc:"초진 검사 및 진단"},
 {id:"second_opinion",label:"2차 소견",icon:"📋",desc:"기존 진단에 대한 재검토"},
-{id:"surgery",label:"수술",icon:"🏥",desc:"수술 상담 및 예약"},
+{id:"surgery",label:"수술",icon:"🏥",desc:"수술 전문의 탐색"},
 {id:"complication",label:"합병증 치료",icon:"⚕️",desc:"치료 후 합병증 관리"},
 ];
 
 /* 더미 의사·HIRA 생성기(genDocs/mkHira)는 제거됨 —
    실제 백엔드 데이터만 표시하며, 로딩 중에는 더미 대신 진행 상태를 보여준다. */
 
-function nxtD(d){const dt=new Date();dt.setDate(dt.getDate()+d);while(dt.getDay()===0||dt.getDay()===6)dt.setDate(dt.getDate()+1);return dt.toISOString().split("T")[0];}
-function fD(s){const d=new Date(s);return`${d.getMonth()+1}/${d.getDate()}(${"일월화수목금토"[d.getDay()]})`;}
 const gh=id=>H.find(h=>h.id===id);
 
 function Steps({current,steps}){return(
@@ -240,7 +238,7 @@ placeholder="예: 간문부 담관암, 미만성 거대B세포 림프종, 베체
 function S2({onDone,ready}){
 const[p,setP]=useState(0);const[st,setSt]=useState("");
 const[waiting,setWaiting]=useState(false);
-const stages=["서울대병원 대기정보 조회 중...","서울아산병원 예약현황 수집 중...","삼성서울병원 의료진 수집 중...","세브란스병원 연동 중...","분당서울대병원 조회 중...","심평원(HIRA) 수술건수·사망률 조회 중...","건보공단(NHIS) 진료통계 연동 중...","PubMed H-index 산출 중...","네이버뉴스 언론노출 집계 중..."];
+const stages=["서울대병원 의료진 수집 중...","서울아산병원 의료진 수집 중...","삼성서울병원 의료진 수집 중...","세브란스병원 연동 중...","분당서울대병원 조회 중...","심평원(HIRA) 수술건수 조회 중...","적정성평가 등급 연동 중...","H-index 산출 중...","네이버뉴스 언론노출 집계 중..."];
 // 실제 데이터가 도착했는지를 ref로 추적 (인터벌 안에서 최신값 참조)
 const readyRef=useRef(ready);
 useEffect(()=>{readyRef.current=ready;},[ready]);
@@ -264,8 +262,8 @@ return(<div style={{textAlign:'center',padding:'60px 20px'}}>
 </div>);}
 
 /* ─── S3: Results ─── */
-function S3({patientData:pd,doctors:all=[],onSelect}){
-const[sortBy,setSort]=useState("wait");
+function S3({patientData:pd,doctors:all=[]}){
+const[sortBy,setSort]=useState("surgery");
 const[expId,setExp]=useState(null);
 const[showH,setSH]=useState(null);
 const dept=pd.department||"소화기내과";
@@ -283,7 +281,6 @@ const getHospitalHira = (hid) => {
   return docWithHira ? docWithHira.hiraData : null;
 };
 const sorted=[...doctorsList].sort((a,b)=>{
-if(sortBy==="wait")return a.waitDays-b.waitDays;
 if(sortBy==="hindex")return b.hIndex-a.hIndex;
 if(sortBy==="news")return b.newsCount-a.newsCount;
 if(sortBy==="surgery")return b.avgSurgeries-a.avgSurgeries;return 0;});
@@ -331,7 +328,7 @@ style={{padding:'6px 10px',borderRadius:8,border:`1px solid ${h.accent}40`,backg
 </div>
 
 <div className="sort-tabs">
-{[{k:"wait",l:"⏱ 대기순"},{k:"surgery",l:"🔪 평균수술수"},{k:"hindex",l:"📊 H-index"},{k:"news",l:"📰 언론노출"}].map(s=>(
+{[{k:"surgery",l:"🔪 평균수술수"},{k:"hindex",l:"📊 H-index"},{k:"news",l:"📰 언론노출"}].map(s=>(
 <button key={s.k} className={`sort-tab ${sortBy===s.k?'active':''}`} onClick={()=>setSort(s.k)}>{s.l}</button>
 ))}
 </div>
@@ -350,7 +347,6 @@ color:idx===0?'#B45309':idx===1?'var(--ink2)':idx===2?'#C2410C':'var(--ink3)'}}>
 <span style={{fontSize:11,color:'var(--ink3)'}}>{doc.position}</span>
 </div>
 <div style={{display:'flex',gap:10,fontSize:11,color:'var(--ink2)',flexWrap:'wrap'}}>
-<span>⏱ <b style={{color:doc.waitDays<=14?'var(--success)':doc.waitDays<=30?'var(--warn)':'var(--danger)'}}>{doc.waitDays}일</b></span>
 <span>🔪 <b style={{color:'var(--ink)'}}>{doc.avgSurgeries>0?doc.avgSurgeries:'—'}</b>건/년</span>
 <span>📊 <b>{doc.hIndex}</b></span>
 <span>📰 <b>{doc.newsCount}</b>건</span>
@@ -370,140 +366,20 @@ color:idx===0?'#B45309':idx===1?'var(--ink2)':idx===2?'#C2410C':'var(--ink3)'}}>
 {doc.hiraData.avgLOS>0&&<span>재원 <b>{doc.hiraData.avgLOS}일</b></span>}
 {doc.hiraData.isEstimate&&<span style={{color:'#92400E'}}>※추정치</span>}
 </div></div>
-<div style={{marginBottom:14}}>
-<div style={{fontSize:12,fontWeight:700,color:'var(--ink2)',marginBottom:6}}>예약 가능</div>
-<div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-{doc.slots.map((sl,si)=><div key={si} style={{padding:'9px 14px',borderRadius:8,background:'#F8FAFC',border:'1px solid var(--border)',fontSize:13}}><b>{fD(sl.date)}</b> {sl.time}</div>)}
-</div></div>
-<div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-<button className="btn btn-primary btn-mid" style={{background:h.color,flex:'1 1 200px'}} onClick={e=>{e.stopPropagation();onSelect(doc);}}>이 의사로 예약 →</button>
-{doc.profileUrl&&<a className="btn btn-secondary btn-mid" href={doc.profileUrl} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} style={{flex:'0 1 auto',textDecoration:'none',display:'inline-flex',alignItems:'center',justifyContent:'center'}}>🔗 병원 소개페이지</a>}
-</div>
+{doc.profileUrl&&<a className="btn btn-primary btn-mid" href={doc.profileUrl} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} style={{background:h.color,textDecoration:'none',display:'flex',alignItems:'center',justifyContent:'center'}}>🔗 병원 공식 소개페이지에서 확인 →</a>}
 </div>}
 </div>);})}
 </div>
-</div>);}
-
-/* ─── S4: Reservation ─── */
-function S4({doctor:doc,patientData:pd,onConfirm,onBack}){
-const[sl,setSl]=useState(null);const[nm,setNm]=useState("");const[ph,setPh]=useState("");const[nt,setNt]=useState("");
-const[ssn1,setSsn1]=useState("");const[ssn2,setSsn2]=useState("");const[addr,setAddr]=useState("");const[showExtra,setShowExtra]=useState(false);
-const h=gh(doc.hospitalId);
-const canSubmit=sl!==null&&nm&&ph;
-return(<div>
-<h2 style={{fontSize:22,fontWeight:800,marginBottom:4}}>예약 확인</h2>
-<p style={{color:'var(--ink3)',fontSize:13,marginBottom:24}}>예약 정보를 확인하고 환자 정보를 입력해주세요.</p>
-<div className="doc-gradient" style={{background:`linear-gradient(135deg,${h.color},${h.accent})`}}>
-<div style={{fontSize:12,opacity:.7,marginBottom:2}}>{h.name}</div>
-<div style={{fontSize:20,fontWeight:800,marginBottom:2}}>{doc.name} {doc.position}</div>
-<div style={{fontSize:13,opacity:.8}}>{pd.disease}</div>
-<div style={{display:'flex',gap:14,marginTop:10,fontSize:11,opacity:.9,flexWrap:'wrap'}}>
-<span>🔪 {doc.avgSurgeries>0?doc.avgSurgeries:'—'}건/년</span><span>H-idx {doc.hIndex}</span><span>논문 {doc.papers}편</span><span>뉴스 {doc.newsCount}건</span>
-</div>
-<div style={{marginTop:10,paddingTop:10,borderTop:'1px solid rgba(255,255,255,.2)',fontSize:10,opacity:.7}}>
-심평원: 병원 수술 {doc.hiraData.annualSurgeries>0?`${doc.hiraData.annualSurgeries}건/년`:'—'}{doc.hiraData.mortalityRate>0?` · 사망률 ${doc.hiraData.mortalityRate}%`:''}{doc.hiraData.complicationRate>0?` · 합병증 ${doc.hiraData.complicationRate}%`:''}{doc.hiraData.isEstimate?' (추정치)':''}
-</div></div>
-<div style={{marginBottom:20}}>
-<label className="label">진료 일시 선택</label>
-<div style={{display:'flex',gap:10}}>
-{doc.slots.map((s,i)=><button key={i} onClick={()=>setSl(i)}
-style={{padding:'14px 20px',borderRadius:12,flex:1,textAlign:'center',border:`2px solid ${sl===i?'var(--ink)':'var(--border)'}`,background:sl===i?'#F8FAFC':'var(--card)',cursor:'pointer',transition:'all .2s'}}>
-<div style={{fontWeight:700,fontSize:15}}>{fD(s.date)}</div><div style={{fontSize:13,color:'var(--ink2)',marginTop:2}}>{s.time}</div>
-</button>)}
-</div></div>
-<div className="two-col" style={{marginBottom:16}}>
-<div><label className="label">환자 이름 <span style={{color:'var(--danger)'}}>*</span></label><input className="input" value={nm} onChange={e=>setNm(e.target.value)} placeholder="홍길동"/></div>
-<div><label className="label">연락처 <span style={{color:'var(--danger)'}}>*</span></label><input className="input" value={ph} onChange={e=>setPh(e.target.value)} placeholder="010-1234-5678"/></div>
-</div>
-
-<div style={{marginBottom:16}}>
-<button onClick={()=>setShowExtra(!showExtra)}
-style={{display:'flex',alignItems:'center',gap:6,width:'100%',padding:'10px 14px',borderRadius:10,
-background:showExtra?'#EFF6FF':'#F8FAFC',border:`1px solid ${showExtra?'#BFDBFE':'var(--border)'}`,
-cursor:'pointer',transition:'all .2s'}}>
-<span style={{fontSize:13,fontWeight:600,color:'var(--ink)',flex:1,textAlign:'left'}}>
-{showExtra?'▼':'▶'} 주민등록번호 · 주소 입력 <span style={{fontSize:11,color:'var(--ink3)',fontWeight:400}}>(선택사항)</span>
-</span>
-</button>
-{showExtra&&<div style={{padding:'14px 0 0'}}>
-<div style={{marginBottom:12}}>
-<label className="label">주민등록번호 <span style={{fontSize:10,color:'var(--ink3)',fontWeight:400}}>— 일부 병원 초진 예약 시 필요</span></label>
-<div style={{display:'flex',gap:8,alignItems:'center'}}>
-<input className="input" value={ssn1} onChange={e=>{const v=e.target.value.replace(/\D/g,'').slice(0,6);setSsn1(v);}}
-placeholder="생년월일 6자리" maxLength={6} style={{flex:1,textAlign:'center',letterSpacing:2,fontFamily:"'JetBrains Mono',monospace"}}/>
-<span style={{fontSize:16,color:'var(--ink3)',fontWeight:700}}>—</span>
-<div style={{flex:1,display:'flex',alignItems:'center',gap:4}}>
-<input className="input" value={ssn2} onChange={e=>{const v=e.target.value.replace(/\D/g,'').slice(0,7);setSsn2(v);}}
-placeholder="뒷자리" maxLength={7} type="password"
-style={{flex:1,textAlign:'center',letterSpacing:2,fontFamily:"'JetBrains Mono',monospace"}}/>
-</div>
-</div>
-<div style={{fontSize:10,color:'var(--warn)',marginTop:4}}>🔒 주민등록번호는 암호화되어 전송되며, 예약 완료 후 즉시 파기됩니다.</div>
-</div>
-<div>
-<label className="label">주소 <span style={{fontSize:10,color:'var(--ink3)',fontWeight:400}}>— 우편물 수령 및 본인확인용</span></label>
-<input className="input" value={addr} onChange={e=>setAddr(e.target.value)}
-placeholder="예: 서울시 강남구 테헤란로 152"/>
-</div>
-</div>}
-</div>
-
-<div style={{marginBottom:16}}><label className="label">특이사항 (선택)</label>
-<textarea className="input" value={nt} onChange={e=>setNt(e.target.value)} placeholder="타 병원 진료 기록, 복용 중인 약물 등"/></div>
-
-{/* Bottom banner buttons */}
-<div style={{marginTop:12}}>
-<button onClick={onBack}
-style={{width:'100%',padding:'12px',borderRadius:10,background:'#F1F5F9',color:'var(--ink2)',
-fontSize:14,fontWeight:600,marginBottom:10,border:'none',cursor:'pointer'}}>
-← 이전 단계로 돌아가기
-</button>
-<button disabled={!canSubmit}
-onClick={()=>onConfirm({doctor:doc,slot:doc.slots[sl],patientName:nm,phone:ph,notes:nt,ssn:ssn1&&ssn2?ssn1+'-'+ssn2:'',address:addr})}
-style={{width:'100%',padding:'22px 0',borderRadius:16,border:'none',cursor:canSubmit?'pointer':'not-allowed',
-background:canSubmit?h.color:'#CBD5E1',color:'#fff',
-fontSize:20,fontWeight:900,letterSpacing:1.5,
-boxShadow:canSubmit?'0 6px 24px rgba(0,0,0,.2)':'none',
-transition:'all .2s'}}>
-✅ 예약 확정
-</button>
-</div>
-</div>);}
-
-/* ─── S5: Confirmation ─── */
-function S5({reservation:rv,onReset}){
-const h=gh(rv.doctor.hospitalId);
-return(<div style={{textAlign:'center',padding:'20px 0'}}>
-<div className="check-circle">✓</div>
-<h2 style={{fontSize:24,fontWeight:800,marginBottom:4}}>예약 완료</h2>
-<p style={{color:'var(--ink3)',fontSize:14,marginBottom:24}}>아래 내용으로 예약이 접수되었습니다.</p>
-<div style={{background:'#F8FAFC',borderRadius:14,padding:22,textAlign:'left',border:'1px solid var(--border)',marginBottom:18}}>
-<div style={{display:'grid',gridTemplateColumns:'auto 1fr',gap:'10px 16px',fontSize:14}}>
-{[["병원",h.name],["담당의",`${rv.doctor.name} ${rv.doctor.position}`],["수술실적",`평균 기관별 ${rv.doctor.avgSurgeries>0?rv.doctor.avgSurgeries:'—'}건/년 (병원 ${rv.doctor.hiraData.annualSurgeries}건/년)`],["일시",`${fD(rv.slot.date)} ${rv.slot.time}`],["환자",rv.patientName],["연락처",rv.phone],rv.address?["주소",rv.address]:null].filter(Boolean).map(([k,v],i)=>
-<React.Fragment key={i}><div style={{color:'var(--ink3)',fontWeight:600}}>{k}</div><div style={{fontWeight:600}}>{v}</div></React.Fragment>
-)}
-</div></div>
-<div className="info-box yellow" style={{marginBottom:24}}>💡 <b>안내:</b> 병원에서 확인 연락이 올 수 있습니다. 건강보험증 및 진료기록을 준비해주세요.</div>
-{rv.redirectUrl && (
-  <a href={rv.redirectUrl} target="_blank" rel="noopener noreferrer" style={{textDecoration:'none', display:'block', marginBottom:12}}>
-    <button className="btn btn-primary btn-big" style={{background:h.color, boxShadow:'0 6px 20px rgba(0,0,0,.15)'}}>
-      🔗 병원 공식 사이트에서 예약 완료하기 (본인인증)
-    </button>
-  </a>
-)}
-<button className={`btn ${rv.redirectUrl ? 'btn-secondary' : 'btn-primary'} btn-big`} onClick={onReset}>새로운 예약 →</button>
 </div>);}
 
 /* ─── App ─── */
 function App(){
 const[step,setStep]=useState(0);
 const[pd,setPd]=useState({});
-const[doc,setDoc]=useState(null);
-const[res,setRes]=useState(null);
 const[doctors,setDoctors]=useState([]);
 const[backendOffline,setBackendOffline]=useState(false);
 const[searchDone,setSearchDone]=useState(false);
-const steps=["환자정보","검색","결과확인","예약","완료"];
+const steps=["환자정보","검색","결과확인"];
 
 const startSearch = async () => {
   setStep(1);
@@ -541,14 +417,11 @@ const startSearch = async () => {
         hospitalId: doc.hospital_id,
         specialty: doc.department,
         hIndex: doc.h_index,
-        waitDays: doc.wait_days,
         newsCount: doc.news_count,
         papers: doc.papers,
         citations: doc.citations,
         hiraData: doc.hira_data,
-        profileUrl: doc.profile_url || "",
-        reservationUrl: doc.reservation_url || "",
-        slots: doc.available_slots.map(s => ({ date: s.date, time: s.time }))
+        profileUrl: doc.profile_url || ""
       }));
       // 개인 수술건수는 심평원에 없음 → '기관 연간수술 ÷ 해당 기관 의사수'로 평균 산출
       const cntByHosp = {};
@@ -570,65 +443,16 @@ const startSearch = async () => {
   }
 };
 
-const confirmReservation = async (reservationData) => {
-  const localReservation = {
-    ...reservationData,
-    doctor: reservationData.doctor,
-    slot: reservationData.slot,
-    patientName: reservationData.patientName,
-    phone: reservationData.phone,
-    notes: reservationData.notes,
-    address: reservationData.address
-  };
-  setRes(localReservation);
-  setStep(4);
-  
-  try {
-    const reserveParams = {
-      doctor_id: reservationData.doctor.id,
-      hospital_id: reservationData.doctor.hospitalId,
-      slot_date: reservationData.slot.date,
-      slot_time: reservationData.slot.time,
-      patient_name: reservationData.patientName,
-      phone: reservationData.phone,
-      ssn: reservationData.ssn || null,
-      address: reservationData.address || null,
-      notes: reservationData.notes || null,
-      reservation_url: reservationData.doctor.reservationUrl || null
-    };
-    
-    const response = await fetch('http://127.0.0.1:8000/api/reserve', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(reserveParams)
-    });
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data && data.success && data.redirect_url) {
-        setRes(prev => ({
-          ...prev,
-          redirectUrl: data.redirect_url
-        }));
-      }
-    }
-  } catch (err) {
-    console.warn("Backend reserve call failed, utilizing local fallback.", err);
-  }
-};
-
-const goHome=()=>{setStep(0);setPd({});setDoc(null);setRes(null);setDoctors([]);setSearchDone(false);};
+const goHome=()=>{setStep(0);setPd({});setDoctors([]);setSearchDone(false);};
 
 return(<div>
 <div className="header"><div className="header-inner">
-<div className="header-tag">BIG 5 HOSPITAL AGENT</div>
-<div className="header-title" onClick={goHome} style={{cursor:'pointer'}} title="처음으로">빅5 병원 통합 예약 에이전트</div>
-<div className="header-sub">서울대 · 아산 · 삼성 · 세브란스 · 분당서울대 ┃ 심평원·건보공단 연동</div>
+<div className="header-tag">BIG 5 DOCTOR SEARCH AGENT</div>
+<div className="header-title" onClick={goHome} style={{cursor:'pointer'}} title="처음으로">빅5 병원 통합 의료진 검색 에이전트</div>
+<div className="header-sub">서울대 · 아산 · 삼성 · 세브란스 · 분당서울대 ┃ 심평원 공개통계 연동 · 예약은 병원 공식 채널 이용</div>
 </div></div>
 <div className="container">
-<Steps current={step>1?step-1:step} steps={steps}/>
+<Steps current={step} steps={steps}/>
 {step>0&&(
 <button onClick={goHome}
 style={{background:'transparent',border:'1px solid #E2E8F0',color:'#64748B',padding:'7px 14px',
@@ -638,9 +462,7 @@ borderRadius:8,fontSize:13,fontWeight:700,cursor:'pointer',marginBottom:16,displ
 )}
 {step===0&&<S1 data={pd} onChange={setPd} onNext={startSearch}/>}
 {step===1&&<S2 onDone={()=>setStep(2)} ready={searchDone}/>}
-{step===2&&<S3 patientData={pd} doctors={doctors} onSelect={d=>{setDoc(d);setStep(3);}}/>}
-{step===3&&doc&&<S4 doctor={doc} patientData={pd} onBack={()=>setStep(2)} onConfirm={confirmReservation}/>}
-{step===4&&res&&<S5 reservation={res} onReset={goHome}/>}
+{step===2&&<S3 patientData={pd} doctors={doctors}/>}
 </div>
 </div>);}
 

@@ -18,14 +18,12 @@ from backend.api.semantic_scholar import SemanticScholarClient
 from backend.api.naver_news import NaverNewsClient
 from backend.crawlers.base import CrawlerOrchestrator
 from backend.utils.kcd_mapper import KCDMapper
-from backend.utils.encryption import encrypt_ssn
 from backend.utils.hindex_cache import HIndexCache
-from backend.utils.reservation_store import ReservationStore
 
 app = FastAPI(
-    title="빅5 병원 통합 예약 에이전트 API",
-    version="1.0.0",
-    description="서울대·아산·삼성·세브란스·분당서울대 통합 검색 및 예약",
+    title="빅5 병원 통합 의료진 검색 에이전트 API",
+    version="2.0.0",
+    description="서울대·아산·삼성·세브란스·분당서울대 의료진 통합 검색·비교 (예약 기능 없음 — 병원 공식 페이지 링크 제공)",
 )
 
 app.add_middleware(
@@ -45,8 +43,6 @@ hindex_client = OpenAlexClient(pubmed_fallback=_s2_client)
 # L2 영속 캐시 — 재시작 후에도 유지 (openalex/S2 7일, pubmed-fallback 1일, 0은 미저장)
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 hindex_cache = HIndexCache(os.path.join(_BASE_DIR, ".cache", "hindex.sqlite3"))
-# 예약 영속 저장 — PII 포함이라 var/ 는 gitignore (SSN 은 has_ssn 불리언만)
-reservation_store = ReservationStore(os.path.join(_BASE_DIR, "var", "reservations.sqlite3"))
 naver_client = NaverNewsClient()
 crawler = CrawlerOrchestrator()
 kcd_mapper = KCDMapper()
@@ -73,29 +69,12 @@ class DoctorResult(BaseModel):
     hospital_name: str
     department: str
     h_index: int
-    wait_days: int
     news_count: int
     papers: int             # PubMed(국제) 논문 수
     citations: int          # PubMed(국제) 피인용 수
     doc_surgeries: int
     hira_data: dict
-    available_slots: list
     emp_id: str = ""             # 병원 내부 의사 식별자 (예: 아산 empId)
-    reservation_url: str = ""    # 의사 프리필 예약 URL (가능한 경우)
-
-class ReservationRequest(BaseModel):
-    doctor_id: str
-    hospital_id: str
-    slot_date: str
-    slot_time: str
-    patient_name: str
-    phone: str
-    ssn: Optional[str] = None         # 주민등록번호 (선택)
-    address: Optional[str] = None     # 주소 (선택)
-    notes: Optional[str] = None
-    # 크롤링된 의사 프리필 예약 딥링크(현재 AMC 제공). 암호화 식별자를 포함해
-    # doctor_id 로 합성 불가 → 검색 응답의 값을 그대로 되돌려 받는다.
-    reservation_url: Optional[str] = None
 
 
 # ─── Endpoints ───────────────────────────────────────
@@ -271,113 +250,15 @@ async def _enrich_doctor(doc: dict, hospital_id: str, hira_data: dict) -> dict:
         "hospital_name": hospital_names[hospital_id],
         "department": doc.get("department", ""),
         "h_index": pub_result.get("h_index", 0),
-        "wait_days": doc.get("wait_days", 0),
         "news_count": news_count,
         "papers": pub_result.get("papers", 0),
         "citations": pub_result.get("citations", 0),
         "hindex_source": pub_result.get("source", ""),   # openalex | pubmed-fallback
         "doc_surgeries": doc.get("surgeries", 0),
         "hira_data": hira_data,
-        "available_slots": doc.get("available_slots", []),
         "emp_id": doc.get("emp_id", ""),
-        "reservation_url": doc.get("reservation_url", ""),
         "profile_url": doc.get("profile_url", ""),
     }
-
-
-def _is_hospital_url(url: str) -> bool:
-    """빅5 병원 공식 도메인의 https URL 인지 검증 (오픈 리다이렉트 방지)."""
-    from urllib.parse import urlparse
-    from config.settings import HOSPITAL_URLS
-    try:
-        p = urlparse(url)
-    except Exception:
-        return False
-    if p.scheme != "https" or not p.hostname:
-        return False
-    allowed = {urlparse(u["home"]).hostname for u in HOSPITAL_URLS.values()}
-    host = p.hostname.lower()
-    # 서브도메인 허용 (예: cancer.amc.seoul.kr) — 등록 도메인 접미사 일치
-    return any(host == a or host.endswith("." + a.split(".", 1)[-1]) for a in allowed)
-
-
-@app.post("/api/reserve")
-async def make_reservation(req: ReservationRequest):
-    """
-    2단계: 예약 실행
-    Semi-auto 방식: 예약 정보 프리필 후 병원 예약 페이지로 리다이렉트
-    """
-    # 주민번호 암호화
-    encrypted_ssn = None
-    if req.ssn:
-        encrypted_ssn = encrypt_ssn(req.ssn)
-
-    # 크롤링된 의사 프리필 딥링크(AMC 등)가 있으면 우선 사용 — 병원 도메인 검증 필수
-    # (클라이언트가 보내는 값이므로 임의 사이트로의 리다이렉트를 차단).
-    reservation_url = ""
-    if req.reservation_url and _is_hospital_url(req.reservation_url):
-        reservation_url = req.reservation_url
-    if not reservation_url:
-        # 폴백: 병원별 예약 페이지 URL 생성 (프리필 파라미터 포함)
-        reservation_url = crawler.build_reservation_url(
-            hospital_id=req.hospital_id,
-            doctor_id=req.doctor_id,
-            date=req.slot_date,
-            time=req.slot_time,
-        )
-
-    import uuid
-    reservation_record = {
-        # 타임스탬프만으로는 동초 충돌 → 짧은 랜덤 접미사
-        "id": f"RES-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6]}",
-        "hospital_id": req.hospital_id,
-        "doctor_id": req.doctor_id,
-        "slot": {"date": req.slot_date, "time": req.slot_time},
-        "patient_name": req.patient_name,
-        "phone": req.phone,
-        "has_ssn": bool(encrypted_ssn),
-        "address": req.address,
-        "notes": req.notes,
-        "status": "pending",
-        "created_at": datetime.now().isoformat(),
-        "reservation_url": reservation_url,
-    }
-
-    # 영속 저장 (var/reservations.sqlite3) — 저장 실패해도 프리필 흐름은 계속
-    try:
-        reservation_store.add(reservation_record)
-    except Exception as e:
-        print(f"[Reserve] store error: {e}")
-
-    return {
-        "success": True,
-        "reservation": reservation_record,
-        "redirect_url": reservation_url,
-        "message": "예약 정보가 준비되었습니다. 병원 사이트에서 본인인증 후 최종 확정해주세요.",
-    }
-
-
-@app.get("/api/reservations")
-async def list_reservations(limit: int = 50):
-    """저장된 예약 목록 (최신순)"""
-    return {"reservations": reservation_store.list(limit=limit)}
-
-
-@app.get("/api/reservations/{rid}")
-async def get_reservation(rid: str):
-    """예약 단건 조회"""
-    rec = reservation_store.get(rid)
-    if rec is None:
-        raise HTTPException(status_code=404, detail="reservation not found")
-    return rec
-
-
-@app.patch("/api/reservations/{rid}")
-async def update_reservation_status(rid: str, status: str):
-    """예약 상태 갱신 (pending → confirmed / cancelled 등)"""
-    if not reservation_store.update_status(rid, status):
-        raise HTTPException(status_code=404, detail="reservation not found")
-    return reservation_store.get(rid)
 
 
 @app.get("/api/hira/{hospital_id}")

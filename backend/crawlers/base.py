@@ -1,16 +1,14 @@
 """
-병원 웹 크롤러 — Playwright 기반.
-각 병원 사이트에서 진료과별 의사 목록, 대기일, 예약 가능일 추출.
+병원 웹 크롤러 — Playwright/httpx 기반.
+각 병원 사이트에서 진료과별 의사 목록(이름·전문분야·소개페이지 링크)을 추출한다.
 
 ## 크롤링 전략
-- 각 병원은 별도 어댑터(snuh.py, amc.py 등)로 분리
-- 사이트 구조 변경 시 해당 어댑터만 수정
+- 각 병원은 별도 어댑터로 분리 — 사이트 구조 변경 시 해당 어댑터만 수정
 - 캐시: 6시간 TTL로 중복 크롤링 방지
 - Rate limit: 병원당 최소 2초 간격
 
-## Semi-auto 예약
-- 전자동 예약은 본인인증(PASS 등) 자동화가 법적으로 제한됨
-- 따라서: 예약 정보를 URL 파라미터로 프리필 → 사용자가 최종 클릭
+※ 예약·대기일 기능은 no_resv 브랜치에서 제거됨(법적 리스크 — 본인인증 자동화 불가,
+  실제 대기일 확인 불가). 검색 + 병원 공식 소개페이지 링크 제공까지만 담당한다.
 """
 import asyncio
 from datetime import datetime, timedelta
@@ -18,7 +16,7 @@ from typing import Optional
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from config.settings import HOSPITAL_URLS, CACHE_TTL_HOURS, MAX_CONCURRENT_CRAWLS
+from config.settings import CACHE_TTL_HOURS, MAX_CONCURRENT_CRAWLS
 
 # ─── 공통 유틸 ────────────────────────────────────────
 # 빅5 병원 사이트는 모두 일반 브라우저 헤더가 없으면 WAF 차단/빈 응답이 올 수 있어
@@ -149,7 +147,7 @@ def _snuh_search(name: str) -> str:
 
 
 def _make_doctor(name: str, position: str, department: str, specialty: str,
-                 emp_id: str = "", reservation_url: str = "", name_en: str = "",
+                 emp_id: str = "", name_en: str = "",
                  profile_url: str = "") -> dict:
     """크롤러 공통 의사 레코드 포맷."""
     return {
@@ -158,11 +156,8 @@ def _make_doctor(name: str, position: str, department: str, specialty: str,
         "position": _clean_ws(position),
         "department": department,
         "specialties": _clean_ws(specialty),
-        "wait_days": 0,            # 별도 예약 페이지에서 조회
-        "available_slots": [],
         "surgeries": 0,
         "emp_id": emp_id,          # 병원 내부 의사 식별자
-        "reservation_url": reservation_url,
         "profile_url": profile_url,  # 병원 웹사이트의 '의료진 소개' 직링크
     }
 
@@ -176,12 +171,8 @@ class HospitalCrawlerBase:
     async def get_doctors(self, department: str) -> list[dict]:
         """
         진료과별 의사 목록 크롤링.
-        Returns: [{name, position, department, specialties, wait_days, available_slots, surgeries}]
+        Returns: [{name, position, department, specialties, surgeries, emp_id, profile_url}]
         """
-        raise NotImplementedError
-
-    async def get_wait_time(self, doctor_name: str) -> int:
-        """의사별 최단 대기일 조회"""
         raise NotImplementedError
 
     async def crawl(self, department: str) -> dict:
@@ -326,7 +317,6 @@ class AMCCrawler(HospitalCrawlerBase):
          - 이름: .doctor_name a
          - 전문분야: table.professionally_info 의 '전문분야' 행
          - empId: onclick="fnDrDetail('{empId}','{deptCode}')"
-         - 실제 진료예약 URL: a[href*="/reservation/main.do"]  (의사 프리필 포함)
 
     ※ 구 엔드포인트(POST /asan/search/doctor/searchDoctor.do)는 WAF 차단 페이지를
        반환하여 폐기함. EUC-KR 인코딩이라 httpx 직접 파싱 불가 → Playwright 렌더링 사용.
@@ -469,31 +459,21 @@ class AMCCrawler(HospitalCrawlerBase):
                 specialty = td.textContent.replace(/\s+/g, ' ').trim();
             });
 
-            // 실제 진료예약 URL (의사 프리필)
-            const resA = li.querySelector('a[href*="/reservation/main.do"]');
-            const reservUrl = resA ? resA.getAttribute('href') : '';
-
-            out.push({ name, empId, specialty, reservUrl });
+            out.push({ name, empId, specialty });
           });
           return out;
         }""")
 
         doctors = []
         for c in cards:
-            reserv = c.get("reservUrl") or ""
-            if reserv.startswith("/"):
-                reserv = self.BASE + reserv
             doctors.append({
                 "name": c["name"],
                 "name_en": "",                        # 목록에 영문명 없음 → 로마자 변환 사용
                 "position": "",                       # 직위는 상세페이지 전용 — 목록 미제공
                 "department": department,
                 "specialties": c.get("specialty", ""),
-                "wait_days": 0,                       # 별도 예약 페이지에서 조회
-                "available_slots": [],
                 "surgeries": 0,
                 "emp_id": c.get("empId", ""),
-                "reservation_url": reserv,            # 실제 의사 프리필 예약 링크
                 "profile_url": _amc_profile(c.get("empId", "")),
             })
         return doctors
@@ -889,26 +869,3 @@ class CrawlerOrchestrator:
         tasks = [self.crawl_hospital(hid, department) for hid in CRAWLERS]
         return await asyncio.gather(*tasks, return_exceptions=True)
 
-    def build_reservation_url(
-        self,
-        hospital_id: str,
-        doctor_id: str,
-        date: str,
-        time: str,
-    ) -> str:
-        """
-        Semi-auto 예약: 병원 예약 페이지 URL에 파라미터 프리필.
-        실제 본인인증은 사용자가 직접 수행.
-        """
-        urls = HOSPITAL_URLS.get(hospital_id, {})
-        base = urls.get("reservation", "#")
-
-        # 병원마다 URL 파라미터 형식이 다름 — 각 병원 어댑터에서 오버라이드 가능
-        param_map = {
-            "snuh":  f"{base}?doctorId={doctor_id}&reservDate={date}&reservTime={time}",
-            "amc":   f"{base}?drNm={doctor_id}&schDt={date}&schTm={time}",
-            "smc":   f"{base}?docCd={doctor_id}&resrvDt={date}&resrvTm={time}",
-            "sev":   f"{base}?drId={doctor_id}&apntDt={date}&apntTm={time}",
-            "snubh": f"{base}?doctorId={doctor_id}&reservDate={date}&reservTime={time}",
-        }
-        return param_map.get(hospital_id, base)

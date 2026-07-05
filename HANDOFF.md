@@ -1,11 +1,21 @@
-# HANDOFF — 빅5 병원 통합 예약 에이전트
+# HANDOFF — 빅5 병원 통합 의료진 검색 에이전트
 
-> 갱신: 2026-07-05. 새 세션은 이 문서부터 읽고 이어가면 됩니다. 모든 커밋은 `master`에 푸시됨.
+> 갱신: 2026-07-05. 새 세션은 이 문서부터 읽고 이어가면 됩니다. **현재 작업 브랜치: `no_resv`** (예약 기능 전면 제거 — 아래 §0).
+
+## 0. `no_resv` 브랜치 — 예약·대기 기능 전면 제거 (2026-07-05 결정)
+사용자 결정: **검색 + 병원 공식 소개페이지 링크까지만** 제공. 이유(법적 리스크):
+- 완전 자동예약은 본인인증 대행(명의도용 소지)·업무방해(매크로 선점)·의료법 27조3항(영리 환자유인) 리스크.
+- **대기일**은 실데이터 확인이 불가하고(비공개) 추정 표기도 오인 소지 → 삭제.
+- 제거된 것: `/api/reserve`·`/api/reservations*`, reservation_store·encryption(SSN)·var/, `build_reservation_url`,
+  HOSPITAL_URLS, wait_days·available_slots·reservation_url 필드, UI의 예약(S4)·완료(S5) 화면·대기순 정렬.
+- 앱명 변경: "빅5 병원 통합 예약 에이전트" → **"빅5 병원 통합 의료진 검색 에이전트"**. 진행 스텝 3단(환자정보→검색→결과확인).
+- 검증: openapi paths = search/hira/health만, 위암·수술 검색 39명(5개 병원) 42s, Playwright UI e2e 통과.
+- master는 예약 포함 마지막 상태(`16190cf`)로 보존.
 
 ## 1. 프로젝트 한 줄 요약
 서울대·아산·삼성·세브란스·분당서울대(빅5)의 **실제 의료진을 크롤링**해 통합 검색하고,
 각 의사의 **h-index·언론노출**, 병원의 **수술건수·적정성평가 등급**으로 비교한 뒤
-세미오토(프리필) 예약으로 연결하는 단일 페이지 앱.
+**병원 공식 소개페이지 링크**로 연결하는 단일 페이지 앱. (예약 기능 없음 — §0)
 
 - 백엔드: FastAPI (`backend/main.py`), 포트 8000
 - 프론트: 단일 `index.html` (React+Babel CDN, 빌드 없음), 정적 서버 포트 8080
@@ -63,7 +73,7 @@ socketserver.TCPServer(("127.0.0.1",8080), H).serve_forever()
 - ⏭ 미적재분: ~~SMC 대장/전립선~~ ✅ 적재 완료. AMC 갑상선·SEV 전체는 공개 데이터 없음(위 재조사 결론) — 추정치가 최종 상태.
 
 ## 5. 의사 소개페이지 딥링크 (완료·실브라우저 검증됨)
-각 의사 카드 "이 의사로 예약 →" 옆 **"🔗 병원 소개페이지"** 버튼(새 탭). URL 빌더는 `backend/crawlers/base.py`, 필드 `profile_url`.
+각 의사 카드 확장 시 **"🔗 병원 공식 소개페이지에서 확인 →"** 버튼(새 탭). URL 빌더는 `backend/crawlers/base.py`, 필드 `profile_url`.
 - amc: `staffBaseInfoDetail.do?drEmpId={emp_id}` / smc: `doctorProfile.do?DR_NO={emp_id}`
 - sev: `doctor-view.do?empNo={emp_id}&deptSeq={seq}`(empNo 이미 인코딩) / snubh: `drIntroduce.do?sDpCd={dept}&sDrSid={emp_id}&sDrStfNo={stf}&sDpTp=O`
 - snuh: 내부사번 미보유 → 통합검색 `search.snuh.org/...?wnquery={이름}` (직행 대신 검색결과)
@@ -107,10 +117,10 @@ socketserver.TCPServer(("127.0.0.1",8080), H).serve_forever()
 - ~~HIRA 미적재 암종 CSV 확충~~ ✅ SMC 6종 적재 완료(§4, 2026-07-05). 잔여(AMC 갑상선·SEV)는 공개 데이터 없음 확인 — 종결. 사망률/합병증은 공개 안 됨(구조적).
 - ~~SNUH 외과 세부분과~~ ✅ 해결(2026-07-05): resolver 1순위를 `/reservation/meddept/main.do`(전 진료과 서버렌더, `treatItemWrap`+`goDetail('코드')`)로 교체 — 위장관외과 GIS·대장항문외과 CRS·간담췌외과 HBPS·유방내분비외과 BEN 해석됨. `_match_dept` 부분일치를 최장(가장 구체적) 과명 우선으로 수정 → 흉부외과가 '외과'(GS)가 아닌 '심장혈관흉부외과'(TS)로 매칭(1→15명). 위암 수술 검색 시 SNUH 6명 중 5명(위암 전문) 반환 검증.
 - ~~유방암·갑상선암 수술과 라우팅~~ ✅ 해결(2026-07-05): 두 질환은 `dept` 자체가 외과(유방외과/내분비외과)라 `surgery_dept` 불필요 — 진짜 문제는 병원별 과명 변형. `_DEPT_ALIASES`에 유방외과→[유방내분비외과 등]·내분비외과→[갑상선내분비외과 등] 추가('유방외과'는 '유방내분비외과'의 연속 부분문자열이 아니라 별칭 필수). 5개 병원 라이브 검증: 유방외과 snuh10/amc19/smc17/sev5/snubh33, 내분비외과 snuh10/amc8/smc4/sev7/snubh33(snubh는 외과 전체→필터 설계). 전문분야 필터: 유방암 snuh10→6·snubh33→4, 갑상선암 snuh10→3·snubh33→4.
-- ~~`/api/reserve` 미저장~~ ✅ 영속화(2026-07-05): `var/reservations.sqlite3`(`backend/utils/reservation_store.py`, PII 포함이라 var/는 gitignore·SSN은 has_ssn 불리언만). 신규 API: GET `/api/reservations`(목록)·GET/PATCH `/api/reservations/{id}`(단건/상태갱신). TestClient로 저장→조회→상태갱신→재시작 후 조회 검증.
-- ~~AMC 실제 예약 URL~~ ✅ 연동(2026-07-05): AMC 카드의 실제 프리필 딥링크(`main.do?doct={암호화블롭}&reservMode=DOCT` — doctor_id로 합성 불가)를 검색응답 `reservation_url`→프론트 `reservationUrl`→`/api/reserve` `reservation_url`로 관통. 백엔드 `_is_hospital_url`(https+빅5 도메인 화이트리스트, 서브도메인 허용)로 검증 후 `redirect_url` 사용, 실패/미전달 시 기존 `build_reservation_url` 폴백. 유닛 10케이스+e2e 4시나리오 통과. 타 병원(snuh 등)은 크롤링 딥링크 없어 폴백 유지.
+- ~~예약 영속화·AMC 예약 딥링크~~ → **§0 결정으로 전부 제거됨**(master `16190cf`까지는 존재).
 - ~~h-index 캐시 영속화~~ ✅ 완료(2026-07-05, §9): SQLite L2, 재시작 검증(1.46s→0.7ms).
 - ~~NCBI 키~~ ✅ 등록 완료(2026-07-05, §3). 첫 검색 속도는 h-index L2 캐시(§9)+NCBI 10req/s로 대부분 해소 — 남은 건 크롤링 자체 시간뿐.
 
 ## 11. 커밋/푸시 상태
-- 전부 `master`에 푸시됨. 최근: `f178348`(평균수술수) `58156e3`(전문분야필터+S2) `0dedffa`(소개링크+OpenAlex) `806db84`(CSV) `ea19e41`(등급API).
+- **작업 브랜치 `no_resv`** (예약 제거 — §0). master는 예약 포함 마지막 상태 `16190cf`에서 동결.
+- master 최근: `16190cf`(AMC딥링크) `5399027`(예약영속화) `9c03d1a`(hindex L2) `b045bc6`(유방/내분비 별칭) `0515521`(SNUH 세부분과) `15a094f`(SMC CSV) `19a1ff9`(OpenAlex 핀).
