@@ -66,7 +66,7 @@ socketserver.TCPServer(("127.0.0.1",8080), H).serve_forever()
 - sev: `doctor-view.do?empNo={emp_id}&deptSeq={seq}`(empNo 이미 인코딩) / snubh: `drIntroduce.do?sDpCd={dept}&sDrSid={emp_id}&sDrStfNo={stf}&sDpTp=O`
 - snuh: 내부사번 미보유 → 통합검색 `search.snuh.org/...?wnquery={이름}` (직행 대신 검색결과)
 
-## 6. h-index — OpenAlex 저자 엔티티 체인 (구현 완료, 라이브 미검증)
+## 6. h-index — OpenAlex 저자 엔티티 체인 (구현 완료·**라이브 검증됨 2026-07-05**)
 이름-문자열 매칭(PubMed)의 동명이인 오염을 **disambiguation된 저자 엔티티**로 교체. 참고구현 `github.com/hwangsi/researcher-kg`(OpenAlex). 설계문서 `docs/H-INDEX-OPENALEX-DESIGN.md`.
 
 **체인: OpenAlex(정밀·기관필터) → Semantic Scholar(빠른 1요청) → PubMed(최후 폴백)**
@@ -76,8 +76,13 @@ socketserver.TCPServer(("127.0.0.1",8080), H).serve_forever()
 - `main.py`: `hindex_client = OpenAlexClient(fallback=S2(fallback=PubMed))`, 응답에 `hindex_source`.
 - **Google Scholar는 부적합**(공식 API 없음+봇차단) — 같은 "최종 h-index 1회 조회"를 OpenAlex/S2로 달성.
 
-⚠️ **미검증(중요)**: 이번 세션 IP가 OpenAlex·S2 **둘 다 429 지속 차단**(내 반복 테스트로 소진). 그래서 라이브 빠른·정확 경로 미검증, 현재는 느린 PubMed 폴백으로 떨어짐(예: 서윤석 S2 h=46 vs PubMed h=4). 순수함수·병합·폴백·회로차단 로직은 검증됨.
-- **다음 세션 할 일**: 레이트리밋 풀린 뒤(또는 다른 네트워크) `.venv/Scripts/python.exe scripts/validate_openalex.py` 1회 실행 → `source='openalex'` 확인 + 기관ID 핀 여부 검토. (교차검증: S2로 김기동 엔티티 h=30 확인했었음.)
+✅ **라이브 검증 완료 (2026-07-05)**: `scripts/validate_openalex.py` 실행 → 5명 전원 `source='openalex'`
+(김기동 h=32·노동영 72·방영주 106·김열홍 52·정현철 88 — 김기동은 지난 세션 S2 교차검증값 30과 근접, PubMed 오염값 4~23 아님).
+- **기관 ID 핀 적용됨**(`HOSPITAL_INST_IDS`): 런타임 키워드 검색이 강북삼성(I4210103535)·강남세브란스(I4210144108)를
+  끌어오던 오매칭 제거 + 기동 시 해석요청 10회 절약. 키워드 검색은 미등록 병원 폴백으로만 유지. 핀 후 재검증 결과 동일.
+- ⚠️ S2 알려진 한계: 무인증 S2는 429가 매우 잦음(반복 테스트 금지 — IP 소진됨). 또한 S2 후보선택이 이름 표기 변형
+  ("Ki-Dong Kim" vs "Kidong Kim")에 따라 다른 엔티티(h=7)를 집을 수 있음. OpenAlex 장애 시에만 쓰는 폴백이라 영향 제한적.
+- 참고: `scripts/validate_openalex.py`는 cp949 콘솔에서 ✅ 문자로 UnicodeEncodeError → `PYTHONIOENCODING=utf-8`로 실행.
 
 ## 7. 질환→의사 매칭 (전문분야 필터, 완료·검증됨)
 진료과(예: 외과)에 위암/대장/간담췌가 섞여 나오던 문제 해결. **크롤링된 전문분야 텍스트**로 질환 매칭.
@@ -96,7 +101,7 @@ socketserver.TCPServer(("127.0.0.1",8080), H).serve_forever()
 - HIRA 우수기관 인덱스는 프로세스 1회 적재(락). h-index 캐시는 인메모리(재시작 시 소실).
 
 ## 10. 알려진 한계 / 후속 후보
-- **h-index 라이브 검증(§6)** — 최우선. OpenAlex/S2 레이트리밋 해제 후 `scripts/validate_openalex.py`.
+- ~~h-index 라이브 검증~~ ✅ 완료(§6, 2026-07-05). 기관ID 핀도 적용.
 - HIRA 미적재 암종 CSV 확충(§4), 사망률/합병증은 공개 안 됨(구조적).
 - SNUH 외과 세부분과 미해결(수술 검색 시 SNUH 결과 적을 수 있음). SNUH resolver가 dept.do 상위+IM만 탐색.
 - `/api/reserve` 인메모리(미저장), AMC 실제 예약 URL 미연동.

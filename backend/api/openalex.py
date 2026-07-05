@@ -36,8 +36,19 @@ from config.settings import OPENALEX_MAILTO, REQUEST_TIMEOUT
 BASE = "https://api.openalex.org"
 AUTHOR_SELECT = "id,display_name,orcid,works_count,cited_by_count,summary_stats,affiliations"
 
-# 병원 → OpenAlex 기관 검색 키워드. 런타임 1회 해석 후 ID 캐시(_inst_cache).
-# 병원명 + 모대학을 함께 넣어 recall ↑ (빅5 교수는 대학명으로만 색인된 논문이 많음 — pubmed.py와 동일 근거).
+# 빅5 → 검증된 OpenAlex 기관 ID 핀 (2026-07-05 라이브 확인).
+# 런타임 키워드 검색은 강북삼성(I4210103535)·강남세브란스(I4210144108) 같은 자매병원을
+# 끌어와 오매칭 위험이 있어, 빅5는 ID를 고정하고 검색은 미등록 병원 폴백으로만 사용.
+# 모대학 ID를 함께 넣어 recall ↑ (빅5 교수는 대학명으로만 색인된 논문이 많음).
+HOSPITAL_INST_IDS = {
+    "서울대학교병원":   ["I2802835388", "I139264467"],                 # SNUH, 서울대
+    "서울아산병원":     ["I2801680663", "I40542001"],                  # AMC, 울산대
+    "삼성서울병원":     ["I2802194831", "I848706"],                    # SMC, 성균관대
+    "세브란스병원":     ["I2799970807", "I193775966", "I4210160791"],  # 신촌, 연세대, YUHS
+    "분당서울대병원":   ["I2803058125", "I139264467"],                 # SNUBH, 서울대
+}
+
+# 병원 → OpenAlex 기관 검색 키워드 (핀 미등록 병원용 폴백). 런타임 1회 해석 후 ID 캐시(_inst_cache).
 HOSPITAL_INST_KEYWORDS = {
     "서울대학교병원":   ["Seoul National University Hospital", "Seoul National University"],
     "서울아산병원":     ["Asan Medical Center", "University of Ulsan"],
@@ -197,7 +208,10 @@ class OpenAlexClient:
         return group or [rep]
 
     async def _resolve_institutions(self, hospital_name: str) -> list[str]:
-        """병원 → OpenAlex 기관 ID 목록 (런타임 해석·캐시). 동시호출 시 1회만 해석."""
+        """병원 → OpenAlex 기관 ID 목록. 빅5는 핀 고정, 그 외는 런타임 해석·캐시."""
+        pinned = HOSPITAL_INST_IDS.get(hospital_name)
+        if pinned:
+            return pinned
         if hospital_name in self._inst_cache:
             return self._inst_cache[hospital_name]
         async with self._inst_lock:
