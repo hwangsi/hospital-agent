@@ -1,0 +1,125 @@
+{
+ "generated_at": "2026-07-06",
+ "snapshots": [
+  {
+   "disease": "위암",
+   "group": "med",
+   "file": "c16_med.json",
+   "doctors": 115
+  },
+  {
+   "disease": "위암",
+   "group": "surg",
+   "file": "c16_surg.json",
+   "doctors": 39
+  },
+  {
+   "disease": "대장암",
+   "group": "med",
+   "file": "c18_med.json",
+   "doctors": 46
+  },
+  {
+   "disease": "대장암",
+   "group": "surg",
+   "file": "c18_surg.json",
+   "doctors": 47
+  },
+  {
+   "disease": "간암",
+   "group": "med",
+   "file": "c22_med.json",
+   "doctors": 53
+  },
+  {
+   "disease": "간암",
+   "group": "surg",
+   "file": "c22_surg.json",
+   "doctors": 23
+  },
+  {
+   "disease": "췌장암",
+   "group": "med",
+   "file": "c25_med.json",
+   "doctors": 51
+  },
+  {
+   "disease": "췌장암",
+   "group": "surg",
+   "file": "c25_surg.json",
+   "doctors": 17
+  },
+  {
+   "disease": "폐암",
+   "group": "med",
+   "file": "c34_med.json",
+   "doctors": 51
+  },
+  {
+   "disease": "폐암",
+   "group": "surg",
+   "file": "c34_surg.json",
+   "doctors": 63
+  },
+  {
+   "disease": "유방암",
+   "group": "med",
+   "file": "c50_med.json",
+   "doctors": 50
+  },
+  {
+   "disease": "유방암",
+   "group": "surg",
+   "file": "c50_surg.json",
+   "doctors": 50
+  },
+  {
+   "disease": "갑상선암",
+   "group": "med",
+   "file": "c73_med.json",
+   "doctors": 22
+  },
+  {
+   "disease": "갑상선암",
+   "group": "surg",
+   "file": "c73_surg.json",
+   "doctors": 22
+  },
+  {
+   "disease": "전립선암",
+   "group": "med",
+   "file": "c61_med.json",
+   "doctors": 26
+  },
+  {
+   "disease": "전립선암",
+   "group": "surg",
+   "file": "c61_surg.json",
+   "doctors": 26
+  },
+  {
+   "disease": "방광암",
+   "group": "med",
+   "file": "c67_med.json",
+   "doctors": 23
+  },
+  {
+   "disease": "방광암",
+   "group": "surg",
+   "file": "c67_surg.json",
+   "doctors": 23
+  },
+  {
+   "disease": "신장암",
+   "group": "med",
+   "file": "c64_med.json",
+   "doctors": 30
+  },
+  {
+   "disease": "신장암",
+   "group": "surg",
+   "file": "c64_surg.json",
+   "doctors": 30
+  }
+ ]
+}

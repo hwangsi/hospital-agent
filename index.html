@@ -72,6 +72,20 @@ input,textarea,button{font-family:inherit}button{cursor:pointer;border:none;outl
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
 <script type="text/babel">
 const{useState,useEffect,useRef}=React;
+/* ─── 데이터 소스 설정 ───
+   - 로컬(127.0.0.1 등): FastAPI 백엔드 호출 (실시간 크롤링)
+   - GitHub Pages(github.io): data/snapshots/*.json 정적 스냅샷 (백엔드 불필요)
+   - ?api=https://... : 원격 백엔드 지정(예: Cloudflare Tunnel) — 정적 배포에서도 실시간 */
+const API_OVERRIDE=new URLSearchParams(location.search).get('api');
+const IS_STATIC=!API_OVERRIDE&&location.hostname.endsWith('github.io');
+const API_BASE=(API_OVERRIDE||'http://127.0.0.1:8000').replace(/\/+$/,'');
+let SNAP_CATALOG=null; // 스냅샷 카탈로그 캐시
+async function loadCatalog(){
+  if(SNAP_CATALOG)return SNAP_CATALOG;
+  const r=await fetch('data/snapshots/index.json');
+  if(!r.ok)throw new Error('catalog '+r.status);
+  SNAP_CATALOG=await r.json();return SNAP_CATALOG;
+}
 const H=[
 {id:"snuh",name:"서울대학교병원",short:"서울대병원",color:"#1B3A5C",accent:"#3B7DD8"},
 {id:"amc",name:"서울아산병원",short:"아산병원",color:"#0D4E2C",accent:"#2EA85A"},
@@ -262,7 +276,7 @@ return(<div style={{textAlign:'center',padding:'60px 20px'}}>
 </div>);}
 
 /* ─── S3: Results ─── */
-function S3({patientData:pd,doctors:all=[]}){
+function S3({patientData:pd,doctors:all=[],demoMiss}){
 const[sortBy,setSort]=useState("surgery");
 const[expId,setExp]=useState(null);
 const[showH,setSH]=useState(null);
@@ -273,7 +287,14 @@ if(doctorsList.length===0){
   return(<div>
     <h2 style={{fontSize:22,fontWeight:800,marginBottom:4}}>검색 결과</h2>
     <p style={{color:'var(--ink3)',fontSize:13,marginBottom:16}}>{pd.disease} · {PU.find(p=>p.id===pd.purpose)?.label}</p>
+    {demoMiss?(
+    <div className="info-box yellow">📦 정적 데모에서는 아래 질환만 검색할 수 있습니다:<br/>
+    <div style={{display:'flex',flexWrap:'wrap',gap:5,marginTop:8}}>
+    {demoMiss.map(d=><span key={d} className="chip" style={{fontSize:12,padding:'4px 10px'}}>{d}</span>)}
+    </div></div>
+    ):(
     <div className="info-box yellow">😕 해당 조건의 의료진을 찾지 못했습니다. 질환명을 다르게 입력하거나 '진료과 선택' 모드로 다시 시도해주세요.</div>
+    )}
   </div>);
 }
 const getHospitalHira = (hid) => {
@@ -379,12 +400,16 @@ const[pd,setPd]=useState({});
 const[doctors,setDoctors]=useState([]);
 const[backendOffline,setBackendOffline]=useState(false);
 const[searchDone,setSearchDone]=useState(false);
+const[demoMiss,setDemoMiss]=useState(null);   // 정적 데모에서 미지원 질환 검색 시 지원 목록
+const[snapDate,setSnapDate]=useState("");     // 스냅샷 생성일 (정적 데모 배너)
+useEffect(()=>{if(IS_STATIC)loadCatalog().then(c=>setSnapDate(c.generated_at)).catch(()=>{});},[]);
 const steps=["환자정보","검색","결과확인"];
 
 const startSearch = async () => {
   setStep(1);
   setDoctors([]);
   setBackendOffline(false);
+  setDemoMiss(null);
   setSearchDone(false);
 
   const searchParams = {
@@ -394,21 +419,35 @@ const startSearch = async () => {
     age: parseInt(pd.age) || 0,
     gender: pd.gender || ""
   };
-  
+
   try {
-    const response = await fetch('http://127.0.0.1:8000/api/search', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(searchParams)
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Server returned status ${response.status}`);
+    let data;
+    if (IS_STATIC) {
+      // 정적 데모: 사전 생성 스냅샷에서 질환+목적 매칭
+      const cat = await loadCatalog();
+      const grp = (searchParams.purpose === 'surgery' || searchParams.purpose === 'complication') ? 'surg' : 'med';
+      const hit = cat.snapshots.find(s => s.disease === searchParams.disease && s.group === grp);
+      if (!hit) {
+        setDemoMiss([...new Set(cat.snapshots.map(s => s.disease))]);
+        setSearchDone(true);
+        return;
+      }
+      const r = await fetch('data/snapshots/' + hit.file);
+      if (!r.ok) throw new Error(`snapshot ${r.status}`);
+      data = await r.json();
+    } else {
+      const response = await fetch(API_BASE + '/api/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(searchParams)
+      });
+      if (!response.ok) {
+        throw new Error(`Server returned status ${response.status}`);
+      }
+      data = await response.json();
     }
-    
-    const data = await response.json();
     if (data && data.doctors) {
       const mapped = data.doctors.map(doc => ({
         id: doc.id,
@@ -452,6 +491,9 @@ return(<div>
 <div className="header-sub">서울대 · 아산 · 삼성 · 세브란스 · 분당서울대 ┃ 심평원 공개통계 연동 · 예약은 병원 공식 채널 이용</div>
 </div></div>
 <div className="container">
+{IS_STATIC&&<div className="info-box blue" style={{marginBottom:16,fontSize:11}}>
+📦 <b>정적 데모</b>{snapDate&&<> · 스냅샷 {snapDate}</>} — 공개 데이터 기반 비영리 정보 제공이며 실시간 조회가 아닙니다. 예약·진료 문의는 각 병원 공식 채널을 이용하세요.
+</div>}
 <Steps current={step} steps={steps}/>
 {step>0&&(
 <button onClick={goHome}
@@ -462,7 +504,7 @@ borderRadius:8,fontSize:13,fontWeight:700,cursor:'pointer',marginBottom:16,displ
 )}
 {step===0&&<S1 data={pd} onChange={setPd} onNext={startSearch}/>}
 {step===1&&<S2 onDone={()=>setStep(2)} ready={searchDone}/>}
-{step===2&&<S3 patientData={pd} doctors={doctors}/>}
+{step===2&&<S3 patientData={pd} doctors={doctors} demoMiss={demoMiss}/>}
 </div>
 </div>);}
 

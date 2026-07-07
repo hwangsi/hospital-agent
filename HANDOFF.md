@@ -12,6 +12,14 @@
 - 검증: openapi paths = search/hira/health만, 위암·수술 검색 39명(5개 병원) 42s, Playwright UI e2e 통과.
 - master는 예약 포함 마지막 상태(`16190cf`)로 보존.
 
+### 0.1 배포 (A안: GitHub Pages 정적 데모, 2026-07-06)
+- **URL**: https://hwangsi.github.io/hospital-agent/ (Pages 소스 = `no_resv` 브랜치 루트)
+- index.html 데이터 소스 3모드: ① 로컬 → `127.0.0.1:8000` 라이브 ② `github.io` → `data/snapshots/*.json` 정적
+  ③ `?api=https://...` → 원격 백엔드(C안 Cloudflare Tunnel 예정, 맥 환경에서 구축 예정) 지정 시 정적 배포에서도 실시간.
+- 스냅샷: `scripts/generate_snapshots.py` — 10개 암종 × med/surg = 20개 JSON + `index.json`(카탈로그·생성일).
+  **로컬에서 재실행 후 커밋으로 갱신** (해외 CI 러너는 병원 사이트 차단 가능성 → GitHub Actions 사용 금지).
+- 미지원 질환 검색 시 지원 질환 칩 목록 안내. 헤더 아래 "정적 데모·비영리 정보 제공" 배너(의료법 유인 선긋기).
+
 ## 1. 프로젝트 한 줄 요약
 서울대·아산·삼성·세브란스·분당서울대(빅5)의 **실제 의료진을 크롤링**해 통합 검색하고,
 각 의사의 **h-index·언론노출**, 병원의 **수술건수·적정성평가 등급**으로 비교한 뒤
