@@ -67,6 +67,9 @@ class OpenAlexClient:
 
     # 전역 스로틀 — polite pool은 10req/s 안정. 0.12s 간격 + 세마포어(main의 _ENRICH_SEM)로
     # 검색당 수십 명 동시 보강 시에도 429를 방지.
+    # 대량 배치(스냅샷 생성 등)는 _MIN_INTERVAL/_COOLDOWN 을 상향/하향 조정해 지속 부하에서
+    # 429→회로차단→전원 폴백으로 무너지는 것을 방지한다 (scripts/generate_snapshots.py 참고).
+    _MIN_INTERVAL = 0.12
     _throttle_lock = asyncio.Lock()
     _last = 0.0
 
@@ -237,7 +240,7 @@ class OpenAlexClient:
 
     async def _throttle(self):
         async with OpenAlexClient._throttle_lock:
-            wait = 0.12 - (time.monotonic() - OpenAlexClient._last)
+            wait = OpenAlexClient._MIN_INTERVAL - (time.monotonic() - OpenAlexClient._last)
             if wait > 0:
                 await asyncio.sleep(wait)
             OpenAlexClient._last = time.monotonic()

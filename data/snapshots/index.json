@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-07-06",
+ "generated_at": "2026-07-07",
  "snapshots": [
   {
    "disease": "위암",
@@ -89,13 +89,13 @@
    "disease": "전립선암",
    "group": "med",
    "file": "c61_med.json",
-   "doctors": 26
+   "doctors": 39
   },
   {
    "disease": "전립선암",
    "group": "surg",
    "file": "c61_surg.json",
-   "doctors": 26
+   "doctors": 39
   },
   {
    "disease": "방광암",

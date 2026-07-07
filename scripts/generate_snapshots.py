@@ -15,8 +15,16 @@ import sys
 from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import backend.main as bm  # noqa: E402
 from backend.main import search_doctors, SearchRequest  # noqa: E402
+from backend.api.openalex import OpenAlexClient  # noqa: E402
 from backend.utils.kcd_mapper import KCDMapper  # noqa: E402
+
+# ── 대량 배치 모드 — 지속 부하에서 OpenAlex 429→회로차단(10분)→전원 폴백 방지 ──
+# (첫 실행에서 807명 중 617명이 pubmed-fallback 으로 저장된 원인)
+OpenAlexClient._MIN_INTERVAL = 0.3   # 0.12s → 0.3s (지속 ~3req/s, polite pool 여유)
+OpenAlexClient._COOLDOWN = 60.0      # 회로차단 열려도 10분 아닌 1분 후 복구
+bm._ENRICH_SEM = asyncio.Semaphore(3)  # 동시 보강 6 → 3
 
 OUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        "data", "snapshots")
