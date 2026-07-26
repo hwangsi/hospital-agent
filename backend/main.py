@@ -36,10 +36,11 @@ app.add_middleware(
 # ─── Clients (싱글톤) ────────────────────────────────
 hira_client = HIRAClient()
 pubmed_client = PubMedClient()
-# H-index 체인: OpenAlex(정밀·기관필터) → Semantic Scholar(빠른 단건) → PubMed(최후 폴백).
-# OpenAlex 가 429일 땐 회로차단 후 S2 가 1요청으로 최종 h-index를 빠르게 제공.
-_s2_client = SemanticScholarClient(pubmed_fallback=pubmed_client)
-hindex_client = OpenAlexClient(pubmed_fallback=_s2_client)
+# H-index 체인: OpenAlex(정밀·기관필터) → PubMed(영문명 변형+소속 필터).
+# S2는 체인에서 제외(2026-07-08): 한국인 이름의 S2 저자 엔티티가 수십 개로 파편화돼 있고
+# affiliation이 비어 기관 필터 불가 → 오매칭 상습(예: 홍성규 h=12 조각 vs PubMed 36).
+_s2_client = SemanticScholarClient(pubmed_fallback=pubmed_client)  # 미사용 보존
+hindex_client = OpenAlexClient(pubmed_fallback=pubmed_client)
 # L2 영속 캐시 — 재시작 후에도 유지 (openalex/S2 7일, pubmed-fallback 1일, 0은 미저장)
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 hindex_cache = HIndexCache(os.path.join(_BASE_DIR, ".cache", "hindex.sqlite3"))

@@ -32,6 +32,7 @@ import aiohttp
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from config.settings import OPENALEX_MAILTO, REQUEST_TIMEOUT
+from backend.utils.name_converter import split_camel_token
 
 BASE = "https://api.openalex.org"
 AUTHOR_SELECT = "id,display_name,orcid,works_count,cited_by_count,summary_stats,affiliations"
@@ -98,7 +99,11 @@ class OpenAlexClient:
         PubMed 클라이언트와 동일한 호출 형태 → main.py 교체만으로 동작.
         name_en/ orcid 둘 다 없으면(주로 임상강사) OpenAlex 매칭 신뢰도가 낮아 바로 PubMed 폴백.
         """
-        name_en = (name_en or "").strip()
+        # 붙임 camelCase 표기 정규화: 'Hong, SungKyu' → 'Hong, Sung Kyu'.
+        # 미분리 시 search= 쿼리와 _name_ok 토큰매칭('sungkyu' vs 'sung kyu hong')이 모두 실패한다.
+        name_en = re.sub(r"[A-Za-z]+",
+                         lambda m: " ".join(split_camel_token(m.group())),
+                         (name_en or "").strip())
         orcid = (orcid or "").strip()
 
         if not name_en and not orcid:
@@ -276,6 +281,7 @@ class OpenAlexClient:
         """PubMed(수정본) 폴백. 없으면 0."""
         if self._pubmed is not None:
             r = dict(await self._pubmed.get_h_index(doctor_name, hospital_name, name_en=name_en))
-            r["source"] = "pubmed-fallback"
+            # 폴백이 자체 source를 밝히면 보존 (S2 성공이 'pubmed-fallback'으로 위장되던 버그)
+            r.setdefault("source", "pubmed-fallback")
             return r
         return {"h_index": 0, "papers": 0, "citations": 0, "source": "none"}

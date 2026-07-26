@@ -116,12 +116,27 @@ def convert_korean_name_to_english(name: str) -> list[str]:
     return _variants(surname_eng, given_parts)
 
 
+_CAMEL_RE = re.compile(r"[A-Z][a-z]+")
+
+
+def split_camel_token(tok: str) -> list[str]:
+    """
+    병원 사이트의 붙임 camelCase 영문명 토큰 분리: 'SungKyu' → ['Sung', 'Kyu'].
+    'SANGHUN'(전대문자)·'Sangchul'(일반 표기)은 분리 근거가 없어 그대로 반환.
+    분당서울대가 'Hong, SungKyu' 형태를 쓰는데, 미분리 시 이니셜 변형('Hong SK')과
+    띄어쓴 출판명('Sung Kyu Hong')을 못 만들어 PubMed/OpenAlex 매칭이 0건이 된다.
+    """
+    parts = _CAMEL_RE.findall(tok)
+    return parts if len(parts) >= 2 and "".join(parts) == tok else [tok]
+
+
 def english_name_to_pubmed_variants(name_en: str) -> list[str]:
     """
     병원 사이트가 제공한 영문명을 PubMed 저자 변형으로 변환 (실제 출판명 기반 → 최정확).
     지원 형식:
       'Yoon, Jung-Hwan'  (성, 이름 — 서울대/세브란스)
       'Kang, Huapyong'   (성, 단일이름)
+      'Hong, SungKyu'    (붙임 camelCase — 분당서울대)
       'Ga Hee Kim'       (이름 ... 성)
       'DONGYUN KIM'      (대문자 혼합)
     """
@@ -146,5 +161,11 @@ def english_name_to_pubmed_variants(name_en: str) -> list[str]:
             surname, given = toks[-1], " ".join(toks[:-1])
 
     surname = surname.capitalize()
-    given_parts = [p.capitalize() for p in re.split(r"[\s\-]+", given) if p]
-    return _variants(surname, given_parts)
+    raw_tokens = [p for p in re.split(r"[\s\-]+", given) if p]
+    given_parts = [q.capitalize() for p in raw_tokens for q in split_camel_token(p)]
+    variants = _variants(surname, given_parts)
+    raw_parts = [p.capitalize() for p in raw_tokens]
+    if given_parts != raw_parts:
+        # camelCase 분리 전 원표기 변형도 보존 ('Sungkyu Hong'으로 등재된 논문 대비)
+        variants += [v for v in _variants(surname, raw_parts) if v not in variants]
+    return variants

@@ -22,6 +22,7 @@ import aiohttp
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from config.settings import REQUEST_TIMEOUT
+from backend.utils.name_converter import split_camel_token
 
 SEARCH_URL = "https://api.semanticscholar.org/graph/v1/author/search"
 FIELDS = "name,hIndex,paperCount,citationCount,affiliations"
@@ -60,7 +61,10 @@ class SemanticScholarClient:
                           name_en: str = "", department: str = "",
                           orcid: str = "") -> dict:
         """OpenAlexClient 와 동일한 호출 형태. name_en 없으면 바로 PubMed 폴백."""
-        name_en = (name_en or "").strip()
+        # 붙임 camelCase 정규화: 'Hong, SungKyu' → 'Hong, Sung Kyu' (openalex.py와 동일 사유)
+        name_en = re.sub(r"[A-Za-z]+",
+                         lambda m: " ".join(split_camel_token(m.group())),
+                         (name_en or "").strip())
         if not name_en:
             return await self._fallback(doctor_name, hospital_name, name_en)
 
@@ -152,6 +156,6 @@ class SemanticScholarClient:
     async def _fallback(self, doctor_name: str, hospital_name: str, name_en: str) -> dict:
         if self._pubmed is not None:
             r = dict(await self._pubmed.get_h_index(doctor_name, hospital_name, name_en=name_en))
-            r["source"] = "pubmed-fallback"
+            r.setdefault("source", "pubmed-fallback")
             return r
         return {"h_index": 0, "papers": 0, "citations": 0, "source": "none"}
